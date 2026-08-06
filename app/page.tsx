@@ -27,6 +27,10 @@ type AppHistoryState = {
   unclozetView?: ViewMode;
   activeSessionId?: string | null;
 };
+type AppRouteState = {
+  viewMode: ViewMode;
+  activeSessionId: string | null;
+};
 type SwipeState = {
   id: string;
   startX: number;
@@ -156,6 +160,28 @@ function pruneOldSessions(sessions: SavedSession[]) {
 
 function sortSavedSessions(sessions: SavedSession[]) {
   return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function routePath(viewMode: ViewMode, activeSessionId: string | null) {
+  if (viewMode === "list") {
+    return "/list";
+  }
+
+  return activeSessionId ? `/memo/${encodeURIComponent(activeSessionId)}` : "/";
+}
+
+function parseRoutePath(pathname: string): AppRouteState {
+  if (pathname === "/list") {
+    return { viewMode: "list", activeSessionId: null };
+  }
+
+  const memoMatch = pathname.match(/^\/memo\/([^/]+)$/);
+
+  if (memoMatch) {
+    return { viewMode: "memo", activeSessionId: decodeURIComponent(memoMatch[1]) };
+  }
+
+  return { viewMode: "memo", activeSessionId: null };
 }
 
 function readLocalSessions() {
@@ -303,6 +329,7 @@ export default function Home() {
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultSectionRef = useRef<HTMLElement>(null);
+  const savedSessionsRef = useRef<SavedSession[]>([]);
   const hasInitializedHistoryRef = useRef(false);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
@@ -410,18 +437,30 @@ export default function Home() {
   }, [query]);
 
   useEffect(() => {
+    savedSessionsRef.current = savedSessions;
+  }, [savedSessions]);
+
+  useEffect(() => {
     const savedMemo = window.localStorage.getItem(MEMO_STORAGE_KEY);
     const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
     const savedActiveSessionId = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
     const localSessions = readLocalSessions();
+    const initialRoute = parseRoutePath(window.location.pathname);
+    const routeSession = initialRoute.activeSessionId
+      ? localSessions.find((session) => session.id === initialRoute.activeSessionId)
+      : undefined;
 
     setDraftTitle(defaultSessionTitle());
 
-    if (savedMemo) {
+    if (routeSession) {
+      setMemo(routeSession.memo);
+      setPaidNicknames(new Set(routeSession.paidNicknames));
+      setActiveSessionId(routeSession.id);
+    } else if (savedMemo) {
       setMemo(savedMemo);
     }
 
-    if (savedPaidNicknames) {
+    if (!routeSession && savedPaidNicknames) {
       try {
         const parsed = JSON.parse(savedPaidNicknames);
 
@@ -436,7 +475,11 @@ export default function Home() {
     setSavedSessions(sortSavedSessions(localSessions));
     window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(sortSavedSessions(localSessions)));
 
-    if (savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
+    if (initialRoute.viewMode === "list") {
+      setViewMode("list");
+    }
+
+    if (!routeSession && savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
       setActiveSessionId(savedActiveSessionId);
     }
 
@@ -448,6 +491,16 @@ export default function Home() {
       .then((remoteSessions) => {
         if (remoteSessions.length === 0) {
           return;
+        }
+
+        if (initialRoute.activeSessionId && !routeSession) {
+          const remoteRouteSession = remoteSessions.find((session) => session.id === initialRoute.activeSessionId);
+
+          if (remoteRouteSession) {
+            setMemo(remoteRouteSession.memo);
+            setPaidNicknames(new Set(remoteRouteSession.paidNicknames));
+            setActiveSessionId(remoteRouteSession.id);
+          }
         }
 
         setSavedSessions((current) => {
@@ -556,27 +609,23 @@ export default function Home() {
   }, [viewMode]);
 
   useEffect(() => {
-    if (!hasLoadedStorage) {
-      return;
-    }
-
-    if (hasInitializedHistoryRef.current) {
-      return;
-    }
-
-    hasInitializedHistoryRef.current = true;
-    window.history.replaceState(
-      { ...(window.history.state ?? {}), unclozetView: viewMode, activeSessionId },
-      "",
-      window.location.href,
-    );
-
     const handlePopState = (event: PopStateEvent) => {
       const state = event.state as AppHistoryState | null;
 
       if (state?.unclozetView === "list" || state?.unclozetView === "memo") {
+        const session = state.activeSessionId
+          ? savedSessionsRef.current.find((savedSession) => savedSession.id === state.activeSessionId)
+          : undefined;
+
+        if (session) {
+          setMemo(session.memo);
+          setPaidNicknames(new Set(session.paidNicknames));
+        }
+
         setViewMode(state.unclozetView);
         setActiveSessionId(state.activeSessionId ?? null);
+        setPaymentFilter("all");
+        setQuery("");
         setDeleteTargetId(null);
         setSwipeState(null);
         setSwipedSessionId(null);
@@ -589,6 +638,19 @@ export default function Home() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStorage || hasInitializedHistoryRef.current) {
+      return;
+    }
+
+    hasInitializedHistoryRef.current = true;
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), unclozetView: viewMode, activeSessionId },
+      "",
+      routePath(viewMode, activeSessionId),
+    );
   }, [activeSessionId, hasLoadedStorage, viewMode]);
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -649,7 +711,15 @@ export default function Home() {
     window.history.pushState(
       { ...(window.history.state ?? {}), unclozetView: nextViewMode, activeSessionId: nextActiveSessionId },
       "",
-      window.location.href,
+      routePath(nextViewMode, nextActiveSessionId),
+    );
+  };
+
+  const replaceCurrentHistoryEntry = (nextViewMode: ViewMode, nextActiveSessionId: string | null) => {
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), unclozetView: nextViewMode, activeSessionId: nextActiveSessionId },
+      "",
+      routePath(nextViewMode, nextActiveSessionId),
     );
   };
 
@@ -729,6 +799,7 @@ export default function Home() {
       setSavedSessions((current) =>
         sortSavedSessions(current.map((session) => (session.id === activeSession.id ? nextSession : session))),
       );
+      replaceCurrentHistoryEntry("memo", activeSession.id);
       saveRemoteSession(nextSession).catch(() => undefined);
       return;
     }
@@ -744,6 +815,7 @@ export default function Home() {
 
     setActiveSessionId(nextSession.id);
     setSavedSessions((current) => sortSavedSessions([nextSession, ...current]));
+    replaceCurrentHistoryEntry("memo", nextSession.id);
     saveRemoteSession(nextSession).catch(() => undefined);
   };
 
