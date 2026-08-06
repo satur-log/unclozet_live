@@ -23,6 +23,10 @@ type PriceEntry = {
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
 type ViewMode = "memo" | "list";
 type PaymentFilter = "all" | "unpaid";
+type AppHistoryState = {
+  unclozetView?: ViewMode;
+  activeSessionId?: string | null;
+};
 type SwipeState = {
   id: string;
   startX: number;
@@ -299,6 +303,7 @@ export default function Home() {
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultSectionRef = useRef<HTMLElement>(null);
+  const hasInitializedHistoryRef = useRef(false);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
   const sortedSummaries = useMemo(() => {
@@ -550,6 +555,42 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [viewMode]);
 
+  useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    if (hasInitializedHistoryRef.current) {
+      return;
+    }
+
+    hasInitializedHistoryRef.current = true;
+    window.history.replaceState(
+      { ...(window.history.state ?? {}), unclozetView: viewMode, activeSessionId },
+      "",
+      window.location.href,
+    );
+
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state as AppHistoryState | null;
+
+      if (state?.unclozetView === "list" || state?.unclozetView === "memo") {
+        setViewMode(state.unclozetView);
+        setActiveSessionId(state.activeSessionId ?? null);
+        setDeleteTargetId(null);
+        setSwipeState(null);
+        setSwipedSessionId(null);
+
+        if (state.unclozetView === "memo") {
+          requestAnimationFrame(focusTextareaEnd);
+        }
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [activeSessionId, hasLoadedStorage, viewMode]);
+
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       setQuery("");
@@ -601,6 +642,15 @@ export default function Home() {
         resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
+  };
+
+  const navigateToView = (nextViewMode: ViewMode, nextActiveSessionId = activeSessionId) => {
+    setViewMode(nextViewMode);
+    window.history.pushState(
+      { ...(window.history.state ?? {}), unclozetView: nextViewMode, activeSessionId: nextActiveSessionId },
+      "",
+      window.location.href,
+    );
   };
 
   const deleteTarget = savedSessions.find((session) => session.id === deleteTargetId);
@@ -701,7 +751,7 @@ export default function Home() {
     setMemo(session.memo);
     setPaidNicknames(new Set(session.paidNicknames));
     setActiveSessionId(session.id);
-    setViewMode("memo");
+    navigateToView("memo", session.id);
     setPaymentFilter("all");
     setQuery("");
   };
@@ -733,7 +783,7 @@ export default function Home() {
     setDraftTitle(defaultSessionTitle());
     setPaymentFilter("all");
     setQuery("");
-    setViewMode("memo");
+    navigateToView("memo", null);
     requestAnimationFrame(focusTextareaEnd);
   };
 
@@ -790,7 +840,7 @@ export default function Home() {
             {viewMode === "memo" ? (
               <button
                 type="button"
-                onClick={() => setViewMode("list")}
+                onClick={() => navigateToView("list")}
                 className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
               >
                 리스트
