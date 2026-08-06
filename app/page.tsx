@@ -20,8 +20,6 @@ type PriceEntry = {
   rawPrice: string;
 };
 
-const SAMPLE_TEXT = "홍길동: 1.5 + 2.3 + 0.8\n민지: 15000 + 2\n수아: 8000 + 1.2";
-
 function normalizePrice(value: string) {
   const compact = value.replace(/,/g, "");
   const numericValue = Number(compact);
@@ -112,7 +110,7 @@ function escapeCsvCell(value: string | number) {
 }
 
 export default function Home() {
-  const [memo, setMemo] = useState(SAMPLE_TEXT);
+  const [memo, setMemo] = useState("");
   const [query, setQuery] = useState("");
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
