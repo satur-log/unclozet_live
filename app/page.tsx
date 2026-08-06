@@ -269,6 +269,7 @@ export default function Home() {
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -316,6 +317,7 @@ export default function Home() {
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
   const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
+  const pageTitle = activeSession?.title ?? draftTitle;
 
   const memoMatches = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -372,6 +374,8 @@ export default function Home() {
     const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
     const savedActiveSessionId = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
     const localSessions = readLocalSessions();
+
+    setDraftTitle(defaultSessionTitle());
 
     if (savedMemo) {
       setMemo(savedMemo);
@@ -569,7 +573,7 @@ export default function Home() {
 
     const nextSession = {
       id: crypto.randomUUID(),
-      title: defaultSessionTitle(now),
+      title: draftTitle || defaultSessionTitle(now),
       memo,
       paidNicknames: paidList,
       createdAt: now.toISOString(),
@@ -613,6 +617,7 @@ export default function Home() {
     setMemo("");
     setPaidNicknames(new Set());
     setActiveSessionId(null);
+    setDraftTitle(defaultSessionTitle());
     setQuery("");
     setViewMode("memo");
     requestAnimationFrame(focusTextareaEnd);
@@ -643,6 +648,50 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-[#FAFAFA] pb-8 text-[#0A0A0A]">
+      <header className="border-b border-[#E8E8EC] bg-white px-3 py-3 md:px-6">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="truncate font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A] md:text-[32px]">
+              {viewMode === "list" ? "저장 리스트" : pageTitle}
+            </h1>
+            <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+              {viewMode === "list"
+                ? `최근 7일 기준 · ${hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}`
+                : activeSession
+                  ? "자동 저장 중"
+                  : "저장 전 임시 저장 중"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {viewMode === "memo" ? (
+              <button
+                type="button"
+                onClick={saveCurrentSession}
+                disabled={!memo.trim()}
+                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              >
+                저장
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startNewMemo}
+                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+              >
+                새 메모
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setViewMode(viewMode === "memo" ? "list" : "memo")}
+              className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
+            >
+              {viewMode === "memo" ? "리스트" : "입력"}
+            </button>
+          </div>
+        </div>
+      </header>
+
       <div className="sticky top-0 z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur md:px-6">
         <div className="mx-auto flex max-w-7xl items-center gap-3">
           <label className="sr-only" htmlFor="search">
@@ -664,13 +713,6 @@ export default function Home() {
             className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
           >
             지우기
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode(viewMode === "memo" ? "list" : "memo")}
-            className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
-          >
-            {viewMode === "memo" ? "리스트" : "입력"}
           </button>
         </div>
         <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
@@ -700,22 +742,6 @@ export default function Home() {
 
       {viewMode === "list" ? (
         <section className="mx-auto grid max-w-7xl gap-4 px-3 pt-5 md:px-6 md:pt-8">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
-            <div>
-              <h1 className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">저장 리스트</h1>
-              <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                최근 7일 기준 · {hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={startNewMemo}
-              className="h-11 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
-            >
-              새 메모
-            </button>
-          </div>
-
           {savedSessions.length > 0 ? (
             savedSessions.map((session) => {
               const sessionSummaries = parseMemo(session.memo);
@@ -789,18 +815,9 @@ export default function Home() {
             <div>
               <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
                 검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
-                {activeSession ? ` · ${activeSession.title} 자동 저장 중` : " · 저장 전 임시 저장 중"}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={saveCurrentSession}
-                disabled={!memo.trim()}
-                className="h-11 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
-              >
-                저장
-              </button>
               <label className="sr-only" htmlFor="sort">
                 정렬
               </label>
