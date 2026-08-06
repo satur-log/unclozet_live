@@ -295,6 +295,7 @@ export default function Home() {
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const [swipedSessionId, setSwipedSessionId] = useState<string | null>(null);
   const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultSectionRef = useRef<HTMLElement>(null);
@@ -602,10 +603,27 @@ export default function Home() {
     }
   };
 
-  const deleteSession = (id: string) => {
+  const deleteTarget = savedSessions.find((session) => session.id === deleteTargetId);
+
+  const requestDeleteSession = (id: string) => {
+    setDeleteTargetId(id);
+  };
+
+  const cancelDeleteSession = () => {
+    setDeleteTargetId(null);
+  };
+
+  const confirmDeleteSession = () => {
+    if (!deleteTargetId) {
+      return;
+    }
+
+    const id = deleteTargetId;
+
     setSavedSessions((current) => current.filter((session) => session.id !== id));
     setSwipedSessionId(null);
     setSwipeState(null);
+    setDeleteTargetId(null);
 
     if (activeSessionId === id) {
       setActiveSessionId(null);
@@ -642,12 +660,8 @@ export default function Home() {
       return;
     }
 
-    if (swipeState.deltaX <= -96) {
-      deleteSession(id);
-    } else {
-      setSwipedSessionId(swipeState.deltaX <= -44 ? id : null);
-      setSwipeState(null);
-    }
+    setSwipedSessionId(swipeState.deltaX <= -44 ? id : null);
+    setSwipeState(null);
   };
 
   const saveCurrentSession = () => {
@@ -856,7 +870,7 @@ export default function Home() {
                 <div key={session.id} className="relative overflow-hidden rounded-xl bg-[#EF4444]">
                   <button
                     type="button"
-                    onClick={() => deleteSession(session.id)}
+                    onClick={() => requestDeleteSession(session.id)}
                     className="absolute inset-y-0 right-0 w-28 font-['DM_Sans'] text-[14px] font-bold text-white"
                   >
                     삭제
@@ -1029,6 +1043,33 @@ export default function Home() {
           </section>
         </section>
       )}
+
+      {deleteTarget ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-[#E8E8EC] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+            <h2 className="font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A]">리스트 삭제</h2>
+            <p className="mt-2 font-['DM_Sans'] text-[14px] font-medium leading-6 text-[#6B6B6B]">
+              {deleteTarget.title} 리스트를 삭제할까요?
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelDeleteSession}
+                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:border-[#6366F1] hover:text-[#6366F1]"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteSession}
+                className="h-10 rounded-md bg-[#EF4444] px-4 font-['DM_Sans'] text-[14px] font-bold text-white transition hover:bg-[#DC2626]"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
