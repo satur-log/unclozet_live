@@ -344,7 +344,7 @@ export default function Home() {
           </button>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-4">
           {filteredSummaries.length > 0 ? (
             filteredSummaries.map((summary) => (
               <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
@@ -373,7 +373,7 @@ export default function Home() {
               </article>
             ))
           ) : (
-            <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C] md:col-span-2 xl:col-span-3">
+            <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
               표시할 결과가 없습니다.
             </div>
           )}
