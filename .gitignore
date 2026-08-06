@@ -3,6 +3,7 @@ node_modules
 .next
 out
 .env*
+!.env.example
 work
 outputs
 npm-debug.log*

@@ -21,9 +21,25 @@ type PriceEntry = {
 };
 
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
+type ViewMode = "memo" | "list";
+
+type SavedSession = {
+  id: string;
+  title: string;
+  memo: string;
+  paidNicknames: string[];
+  createdAt: string;
+  updatedAt: string;
+};
 
 const MEMO_STORAGE_KEY = "unclozet-live-memo";
 const PAID_STORAGE_KEY = "unclozet-live-paid-nicknames";
+const SAVED_SESSIONS_STORAGE_KEY = "unclozet-live-saved-sessions";
+const ACTIVE_SESSION_STORAGE_KEY = "unclozet-live-active-session-id";
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 function normalizePrice(value: string) {
   const compact = value.replace(/,/g, "");
@@ -80,13 +96,12 @@ function parseMemo(text: string): BuyerSummary[] {
 
     priceEntries.forEach((entry) => {
       const price = normalizePrice(entry.rawPrice);
-      const item = {
+
+      previous.items.push({
         clothingNo: entry.clothingNo,
         rawPrice: entry.rawPrice,
         price,
-      };
-
-      previous.items.push(item);
+      });
       previous.quantity += 1;
       previous.total += price;
     });
@@ -114,11 +129,146 @@ function escapeCsvCell(value: string | number) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function defaultSessionTitle(date = new Date()) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function pruneOldSessions(sessions: SavedSession[]) {
+  const threshold = Date.now() - ONE_WEEK_MS;
+  return sessions.filter((session) => new Date(session.updatedAt).getTime() >= threshold);
+}
+
+function sortSavedSessions(sessions: SavedSession[]) {
+  return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function readLocalSessions() {
+  const saved = window.localStorage.getItem(SAVED_SESSIONS_STORAGE_KEY);
+
+  if (!saved) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(saved);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return pruneOldSessions(
+      parsed.filter((session): session is SavedSession => {
+        return (
+          typeof session?.id === "string" &&
+          typeof session?.title === "string" &&
+          typeof session?.memo === "string" &&
+          Array.isArray(session?.paidNicknames) &&
+          typeof session?.createdAt === "string" &&
+          typeof session?.updatedAt === "string"
+        );
+      }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function fetchRemoteSessions() {
+  if (!hasSupabase) {
+    return [];
+  }
+
+  const since = new Date(Date.now() - ONE_WEEK_MS).toISOString();
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/live_memos?updated_at=gte.${encodeURIComponent(since)}&order=updated_at.desc`,
+    {
+      headers: {
+        apikey: SUPABASE_ANON_KEY ?? "",
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to load remote sessions");
+  }
+
+  const rows = await response.json();
+
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+
+  return rows.map((row): SavedSession => {
+    const paidNicknames = Array.isArray(row.paid_nicknames)
+      ? row.paid_nicknames.filter((value: unknown) => typeof value === "string")
+      : [];
+
+    return {
+      id: String(row.id),
+      title: String(row.title ?? defaultSessionTitle()),
+      memo: String(row.memo ?? ""),
+      paidNicknames,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  });
+}
+
+async function deleteRemoteOldSessions() {
+  if (!hasSupabase) {
+    return;
+  }
+
+  const since = new Date(Date.now() - ONE_WEEK_MS).toISOString();
+
+  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?updated_at=lt.${encodeURIComponent(since)}`, {
+    method: "DELETE",
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+}
+
+async function saveRemoteSession(session: SavedSession) {
+  if (!hasSupabase) {
+    return;
+  }
+
+  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?on_conflict=id`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({
+      id: session.id,
+      title: session.title,
+      memo: session.memo,
+      paid_nicknames: session.paidNicknames,
+      created_at: session.createdAt,
+      updated_at: session.updatedAt,
+    }),
+  });
+}
+
 export default function Home() {
   const [memo, setMemo] = useState("");
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("memo");
+  const [viewMode, setViewMode] = useState<ViewMode>("memo");
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -165,6 +315,7 @@ export default function Home() {
   const grandQuantity = summaries.reduce((sum, summary) => sum + summary.quantity, 0);
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
   const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
+  const activeSession = savedSessions.find((session) => session.id === activeSessionId);
 
   const memoMatches = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -200,6 +351,18 @@ export default function Home() {
     [memoMatches],
   );
 
+  const focusTextareaEnd = () => {
+    const textarea = textareaRef.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  };
+
   useEffect(() => {
     setActiveMemoMatchIndex(-1);
   }, [query]);
@@ -207,6 +370,8 @@ export default function Home() {
   useEffect(() => {
     const savedMemo = window.localStorage.getItem(MEMO_STORAGE_KEY);
     const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
+    const savedActiveSessionId = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    const localSessions = readLocalSessions();
 
     if (savedMemo) {
       setMemo(savedMemo);
@@ -224,7 +389,38 @@ export default function Home() {
       }
     }
 
+    setSavedSessions(sortSavedSessions(localSessions));
+    window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(sortSavedSessions(localSessions)));
+
+    if (savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
+      setActiveSessionId(savedActiveSessionId);
+    }
+
     setHasLoadedStorage(true);
+
+    deleteRemoteOldSessions().catch(() => undefined);
+
+    fetchRemoteSessions()
+      .then((remoteSessions) => {
+        if (remoteSessions.length === 0) {
+          return;
+        }
+
+        setSavedSessions((current) => {
+          const merged = new Map<string, SavedSession>();
+
+          [...current, ...remoteSessions].forEach((session) => {
+            const existing = merged.get(session.id);
+
+            if (!existing || new Date(session.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+              merged.set(session.id, session);
+            }
+          });
+
+          return sortSavedSessions(pruneOldSessions(Array.from(merged.values())));
+        });
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -244,6 +440,59 @@ export default function Home() {
   }, [hasLoadedStorage, paidNicknames]);
 
   useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(savedSessions));
+  }, [hasLoadedStorage, savedSessions]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    if (activeSessionId) {
+      window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, activeSessionId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    }
+  }, [activeSessionId, hasLoadedStorage]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage || !activeSessionId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      let nextSession: SavedSession | undefined;
+
+      setSavedSessions((current) => {
+        const existing = current.find((session) => session.id === activeSessionId);
+
+        if (!existing) {
+          return current;
+        }
+
+        nextSession = {
+          ...existing,
+          memo,
+          paidNicknames: Array.from(paidNicknames),
+          updatedAt: new Date().toISOString(),
+        };
+
+        return sortSavedSessions(current.map((session) => (session.id === activeSessionId ? nextSession! : session)));
+      });
+
+      if (nextSession) {
+        saveRemoteSession(nextSession).catch(() => undefined);
+      }
+    }, 800);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeSessionId, hasLoadedStorage, memo, paidNicknames]);
+
+  useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       const shouldFocusSearch = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
 
@@ -257,18 +506,6 @@ export default function Home() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
-
-  const focusTextareaEnd = () => {
-    const textarea = textareaRef.current;
-
-    if (!textarea) {
-      return;
-    }
-
-    textarea.focus();
-    const end = textarea.value.length;
-    textarea.setSelectionRange(end, end);
-  };
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
@@ -309,6 +546,76 @@ export default function Home() {
 
       return next;
     });
+  };
+
+  const saveCurrentSession = () => {
+    const now = new Date();
+    const paidList = Array.from(paidNicknames);
+
+    if (activeSession) {
+      const nextSession = {
+        ...activeSession,
+        memo,
+        paidNicknames: paidList,
+        updatedAt: now.toISOString(),
+      };
+
+      setSavedSessions((current) =>
+        sortSavedSessions(current.map((session) => (session.id === activeSession.id ? nextSession : session))),
+      );
+      saveRemoteSession(nextSession).catch(() => undefined);
+      return;
+    }
+
+    const nextSession = {
+      id: crypto.randomUUID(),
+      title: defaultSessionTitle(now),
+      memo,
+      paidNicknames: paidList,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    setActiveSessionId(nextSession.id);
+    setSavedSessions((current) => sortSavedSessions([nextSession, ...current]));
+    saveRemoteSession(nextSession).catch(() => undefined);
+  };
+
+  const loadSession = (session: SavedSession) => {
+    setMemo(session.memo);
+    setPaidNicknames(new Set(session.paidNicknames));
+    setActiveSessionId(session.id);
+    setViewMode("memo");
+    setQuery("");
+  };
+
+  const updateSessionTitle = (id: string, title: string) => {
+    const updatedAt = new Date().toISOString();
+    const existing = savedSessions.find((session) => session.id === id);
+
+    if (!existing) {
+      return;
+    }
+
+    const nextSession = {
+      ...existing,
+      title,
+      updatedAt,
+    };
+
+    setSavedSessions((current) =>
+      sortSavedSessions(current.map((session) => (session.id === id ? nextSession : session))),
+    );
+    saveRemoteSession(nextSession).catch(() => undefined);
+  };
+
+  const startNewMemo = () => {
+    setMemo("");
+    setPaidNicknames(new Set());
+    setActiveSessionId(null);
+    setQuery("");
+    setViewMode("memo");
+    requestAnimationFrame(focusTextareaEnd);
   };
 
   const handleDownloadCsv = () => {
@@ -358,6 +665,13 @@ export default function Home() {
           >
             지우기
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode(viewMode === "memo" ? "list" : "memo")}
+            className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
+          >
+            {viewMode === "memo" ? "리스트" : "입력"}
+          </button>
         </div>
         <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
           <span className="rounded-full bg-[#F1F1F4] px-3 py-1">
@@ -384,111 +698,183 @@ export default function Home() {
         </div>
       </div>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
-        <div className="grid grid-cols-3 gap-3 md:gap-5">
-          <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
-            <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">고객</p>
-            <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{summaries.length}명</p>
-          </div>
-          <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
-            <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">수량</p>
-            <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{grandQuantity}개</p>
-          </div>
-          <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
-            <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">합계</p>
-            <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#6366F1] md:text-[32px]">{won(grandTotal)}</p>
-          </div>
-        </div>
-
-        <textarea
-          ref={textareaRef}
-          value={memo}
-          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
-          className="min-h-[70dvh] w-full rounded-xl border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[17px] leading-8 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-[74dvh] md:p-5 md:text-[19px]"
-          placeholder="예: 홍길동: 1.5 + 2.3 + 0.8"
-          spellCheck={false}
-        />
-
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
-          <div>
-            <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-              검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="sr-only" htmlFor="sort">
-              정렬
-            </label>
-            <select
-              id="sort"
-              value={sortMode}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => setSortMode(event.target.value as SortMode)}
-              className="h-11 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
-            >
-              <option value="memo">메모 순서</option>
-              <option value="name">가나다순</option>
-              <option value="amountAsc">금액 오름차순</option>
-              <option value="amountDesc">금액 내림차순</option>
-            </select>
+      {viewMode === "list" ? (
+        <section className="mx-auto grid max-w-7xl gap-4 px-3 pt-5 md:px-6 md:pt-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
+            <div>
+              <h1 className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">저장 리스트</h1>
+              <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                최근 7일 기준 · {hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={handleDownloadCsv}
-              disabled={summaries.length === 0}
-              className="h-11 rounded-md bg-[#6366F1] px-6 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+              onClick={startNewMemo}
+              className="h-11 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
             >
-              엑셀 다운로드
+              새 메모
             </button>
           </div>
-        </div>
 
-        <section className="grid gap-4">
-          {filteredSummaries.length > 0 ? (
-            filteredSummaries.map((summary) => (
-              <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <input
-                      id={`paid-${encodeURIComponent(summary.nickname)}`}
-                      type="checkbox"
-                      checked={paidNicknames.has(summary.nickname)}
-                      onChange={() => togglePaid(summary.nickname)}
-                      className="mt-1 size-5 rounded border border-[#E8E8EC] accent-[#6366F1]"
-                    />
-                    <div>
-                      <label htmlFor={`paid-${encodeURIComponent(summary.nickname)}`} className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">
-                        {summary.nickname}
+          {savedSessions.length > 0 ? (
+            savedSessions.map((session) => {
+              const sessionSummaries = parseMemo(session.memo);
+              const sessionTotal = sessionSummaries.reduce((sum, summary) => sum + summary.total, 0);
+              const sessionQuantity = sessionSummaries.reduce((sum, summary) => sum + summary.quantity, 0);
+
+              return (
+                <article key={session.id} className="rounded-xl border border-[#E8E8EC] bg-white p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <label className="sr-only" htmlFor={`title-${session.id}`}>
+                        리스트 이름
                       </label>
-                      <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                        총 {summary.quantity}개 · {won(summary.total)}
+                      <input
+                        id={`title-${session.id}`}
+                        value={session.title}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => updateSessionTitle(session.id, event.target.value)}
+                        className="w-full rounded-md border border-transparent bg-transparent px-0 font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:bg-white focus:px-3 focus:ring-[3px] focus:ring-[#6366F1]/15"
+                      />
+                      <p className="mt-2 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                        {sessionSummaries.length}명 · {sessionQuantity}개 · {won(sessionTotal)} · 입금 {session.paidNicknames.length}명
+                      </p>
+                      <p className="mt-1 font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
+                        저장 {new Date(session.updatedAt).toLocaleString("ko-KR")}
                       </p>
                     </div>
-                  </div>
-                  <div className="rounded-lg bg-[#F4F4FF] px-3 py-2 text-right">
-                    <p className="font-['DM_Sans'] text-[11px] font-medium uppercase text-[#6B6B6B]">
-                      {paidNicknames.has(summary.nickname) ? "입금완료" : "미입금"}
-                    </p>
-                    <p className="font-['General_Sans'] text-lg font-bold leading-none text-[#6366F1]">{won(summary.total)}</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {summary.items.map((item, index) => (
-                    <span
-                      key={`${summary.nickname}-${item.clothingNo}-${index}`}
-                      className="rounded-full bg-[#F1F1F4] px-3 py-1 font-['JetBrains_Mono'] text-[12px] font-medium text-[#6B6B6B]"
+                    <button
+                      type="button"
+                      onClick={() => loadSession(session)}
+                      className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
                     >
-                      {itemLabel(item)}
-                    </span>
-                  ))}
-                </div>
-              </article>
-            ))
+                      열기
+                    </button>
+                  </div>
+                </article>
+              );
+            })
           ) : (
             <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
-              표시할 결과가 없습니다.
+              저장된 리스트가 없습니다.
             </div>
           )}
         </section>
-      </section>
+      ) : (
+        <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
+          <div className="grid grid-cols-3 gap-3 md:gap-5">
+            <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
+              <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">고객</p>
+              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{summaries.length}명</p>
+            </div>
+            <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
+              <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">수량</p>
+              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{grandQuantity}개</p>
+            </div>
+            <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
+              <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">합계</p>
+              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#6366F1] md:text-[32px]">{won(grandTotal)}</p>
+            </div>
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            value={memo}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
+            className="min-h-[70dvh] w-full rounded-xl border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[17px] leading-8 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-[74dvh] md:p-5 md:text-[19px]"
+            placeholder="예: 홍길동: 1.5 + 2.3 + 0.8"
+            spellCheck={false}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
+            <div>
+              <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
+                {activeSession ? ` · ${activeSession.title} 자동 저장 중` : " · 저장 전 임시 저장 중"}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={saveCurrentSession}
+                disabled={!memo.trim()}
+                className="h-11 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              >
+                저장
+              </button>
+              <label className="sr-only" htmlFor="sort">
+                정렬
+              </label>
+              <select
+                id="sort"
+                value={sortMode}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => setSortMode(event.target.value as SortMode)}
+                className="h-11 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
+              >
+                <option value="memo">메모 순서</option>
+                <option value="name">가나다순</option>
+                <option value="amountAsc">금액 오름차순</option>
+                <option value="amountDesc">금액 내림차순</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleDownloadCsv}
+                disabled={summaries.length === 0}
+                className="h-11 rounded-md bg-[#6366F1] px-6 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+              >
+                엑셀 다운로드
+              </button>
+            </div>
+          </div>
+
+          <section className="grid gap-4">
+            {filteredSummaries.length > 0 ? (
+              filteredSummaries.map((summary) => (
+                <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <input
+                        id={`paid-${encodeURIComponent(summary.nickname)}`}
+                        type="checkbox"
+                        checked={paidNicknames.has(summary.nickname)}
+                        onChange={() => togglePaid(summary.nickname)}
+                        className="mt-1 size-5 rounded border border-[#E8E8EC] accent-[#6366F1]"
+                      />
+                      <div>
+                        <label htmlFor={`paid-${encodeURIComponent(summary.nickname)}`} className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">
+                          {summary.nickname}
+                        </label>
+                        <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                          총 {summary.quantity}개 · {won(summary.total)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-[#F4F4FF] px-3 py-2 text-right">
+                      <p className="font-['DM_Sans'] text-[11px] font-medium uppercase text-[#6B6B6B]">
+                        {paidNicknames.has(summary.nickname) ? "입금완료" : "미입금"}
+                      </p>
+                      <p className="font-['General_Sans'] text-lg font-bold leading-none text-[#6366F1]">{won(summary.total)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {summary.items.map((item, index) => (
+                      <span
+                        key={`${summary.nickname}-${item.clothingNo}-${index}`}
+                        className="rounded-full bg-[#F1F1F4] px-3 py-1 font-['JetBrains_Mono'] text-[12px] font-medium text-[#6B6B6B]"
+                      >
+                        {itemLabel(item)}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
+                표시할 결과가 없습니다.
+              </div>
+            )}
+          </section>
+        </section>
+      )}
     </main>
   );
 }
