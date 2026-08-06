@@ -20,6 +20,11 @@ type PriceEntry = {
   rawPrice: string;
 };
 
+type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
+
+const MEMO_STORAGE_KEY = "unclozet-live-memo";
+const PAID_STORAGE_KEY = "unclozet-live-paid-nicknames";
+
 function normalizePrice(value: string) {
   const compact = value.replace(/,/g, "");
   const numericValue = Number(compact);
@@ -89,7 +94,7 @@ function parseMemo(text: string): BuyerSummary[] {
     summaries.set(nickname, previous);
   });
 
-  return Array.from(summaries.values()).sort((a, b) => a.nickname.localeCompare(b.nickname, "ko"));
+  return Array.from(summaries.values());
 }
 
 function won(value: number) {
@@ -112,19 +117,40 @@ function escapeCsvCell(value: string | number) {
 export default function Home() {
   const [memo, setMemo] = useState("");
   const [query, setQuery] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("memo");
+  const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
+  const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
+  const sortedSummaries = useMemo(() => {
+    const nextSummaries = [...summaries];
+
+    if (sortMode === "name") {
+      nextSummaries.sort((a, b) => a.nickname.localeCompare(b.nickname, "ko"));
+    }
+
+    if (sortMode === "amountAsc") {
+      nextSummaries.sort((a, b) => a.total - b.total || a.nickname.localeCompare(b.nickname, "ko"));
+    }
+
+    if (sortMode === "amountDesc") {
+      nextSummaries.sort((a, b) => b.total - a.total || a.nickname.localeCompare(b.nickname, "ko"));
+    }
+
+    return nextSummaries;
+  }, [sortMode, summaries]);
+
   const filteredSummaries = useMemo(() => {
     const keyword = query.trim().toLowerCase();
 
     if (!keyword) {
-      return summaries;
+      return sortedSummaries;
     }
 
-    return summaries.filter((summary) => {
+    return sortedSummaries.filter((summary) => {
       const nicknameMatched = summary.nickname.toLowerCase().includes(keyword);
       const itemMatched = summary.items.some((item) => {
         const itemNo = item.clothingNo ? `${item.clothingNo}번`.toLowerCase() : "";
@@ -134,10 +160,11 @@ export default function Home() {
 
       return nicknameMatched || itemMatched;
     });
-  }, [query, summaries]);
+  }, [query, sortedSummaries]);
 
   const grandQuantity = summaries.reduce((sum, summary) => sum + summary.quantity, 0);
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
+  const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
 
   const memoMatches = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -176,6 +203,45 @@ export default function Home() {
   useEffect(() => {
     setActiveMemoMatchIndex(-1);
   }, [query]);
+
+  useEffect(() => {
+    const savedMemo = window.localStorage.getItem(MEMO_STORAGE_KEY);
+    const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
+
+    if (savedMemo) {
+      setMemo(savedMemo);
+    }
+
+    if (savedPaidNicknames) {
+      try {
+        const parsed = JSON.parse(savedPaidNicknames);
+
+        if (Array.isArray(parsed)) {
+          setPaidNicknames(new Set(parsed.filter((value) => typeof value === "string")));
+        }
+      } catch {
+        setPaidNicknames(new Set());
+      }
+    }
+
+    setHasLoadedStorage(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    window.localStorage.setItem(MEMO_STORAGE_KEY, memo);
+  }, [hasLoadedStorage, memo]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    window.localStorage.setItem(PAID_STORAGE_KEY, JSON.stringify(Array.from(paidNicknames)));
+  }, [hasLoadedStorage, paidNicknames]);
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -231,12 +297,27 @@ export default function Home() {
     requestAnimationFrame(() => selectMemoMatch(nextIndex));
   };
 
+  const togglePaid = (nickname: string) => {
+    setPaidNicknames((current) => {
+      const next = new Set(current);
+
+      if (next.has(nickname)) {
+        next.delete(nickname);
+      } else {
+        next.add(nickname);
+      }
+
+      return next;
+    });
+  };
+
   const handleDownloadCsv = () => {
-    const header = ["닉네임", "총수량", "총금액", "상세내역"];
+    const header = ["닉네임", "총수량", "총금액", "입금여부", "상세내역"];
     const rows = summaries.map((summary) => [
       summary.nickname,
       summary.quantity,
       summary.total,
+      paidNicknames.has(summary.nickname) ? "입금완료" : "미입금",
       summary.items.map(itemLabel).join(" + "),
     ]);
     const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
@@ -280,7 +361,7 @@ export default function Home() {
         </div>
         <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
           <span className="rounded-full bg-[#F1F1F4] px-3 py-1">
-            메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명
+            메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명 · 입금 {paidCount}명
           </span>
           <div className="flex gap-2">
             <button
@@ -334,14 +415,30 @@ export default function Home() {
               검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleDownloadCsv}
-            disabled={summaries.length === 0}
-            className="h-11 rounded-md bg-[#6366F1] px-6 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
-          >
-            엑셀 다운로드
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="sort">
+              정렬
+            </label>
+            <select
+              id="sort"
+              value={sortMode}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setSortMode(event.target.value as SortMode)}
+              className="h-11 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
+            >
+              <option value="memo">메모 순서</option>
+              <option value="name">가나다순</option>
+              <option value="amountAsc">금액 오름차순</option>
+              <option value="amountDesc">금액 내림차순</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleDownloadCsv}
+              disabled={summaries.length === 0}
+              className="h-11 rounded-md bg-[#6366F1] px-6 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+            >
+              엑셀 다운로드
+            </button>
+          </div>
         </div>
 
         <section className="grid gap-4">
@@ -349,14 +446,27 @@ export default function Home() {
             filteredSummaries.map((summary) => (
               <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">{summary.nickname}</h2>
-                    <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                      총 {summary.quantity}개 · {won(summary.total)}
-                    </p>
+                  <div className="flex items-start gap-3">
+                    <input
+                      id={`paid-${encodeURIComponent(summary.nickname)}`}
+                      type="checkbox"
+                      checked={paidNicknames.has(summary.nickname)}
+                      onChange={() => togglePaid(summary.nickname)}
+                      className="mt-1 size-5 rounded border border-[#E8E8EC] accent-[#6366F1]"
+                    />
+                    <div>
+                      <label htmlFor={`paid-${encodeURIComponent(summary.nickname)}`} className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">
+                        {summary.nickname}
+                      </label>
+                      <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                        총 {summary.quantity}개 · {won(summary.total)}
+                      </p>
+                    </div>
                   </div>
                   <div className="rounded-lg bg-[#F4F4FF] px-3 py-2 text-right">
-                    <p className="font-['DM_Sans'] text-[11px] font-medium uppercase text-[#6B6B6B]">총액</p>
+                    <p className="font-['DM_Sans'] text-[11px] font-medium uppercase text-[#6B6B6B]">
+                      {paidNicknames.has(summary.nickname) ? "입금완료" : "미입금"}
+                    </p>
                     <p className="font-['General_Sans'] text-lg font-bold leading-none text-[#6366F1]">{won(summary.total)}</p>
                   </div>
                 </div>
