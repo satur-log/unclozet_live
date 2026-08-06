@@ -276,6 +276,7 @@ export default function Home() {
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resultSectionRef = useRef<HTMLElement>(null);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
   const sortedSummaries = useMemo(() => {
@@ -327,6 +328,7 @@ export default function Home() {
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
   const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
   const unpaidCount = Math.max(summaries.length - paidCount, 0);
+  const searchUnpaidCount = searchFilteredSummaries.filter((summary) => !paidNicknames.has(summary.nickname)).length;
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
 
@@ -567,6 +569,18 @@ export default function Home() {
     });
   };
 
+  const toggleUnpaidFilter = () => {
+    const nextFilter = paymentFilter === "unpaid" ? "all" : "unpaid";
+
+    setPaymentFilter(nextFilter);
+
+    if (nextFilter === "unpaid") {
+      requestAnimationFrame(() => {
+        resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  };
+
   const saveCurrentSession = () => {
     const now = new Date();
     const paidList = Array.from(paidNicknames);
@@ -701,10 +715,10 @@ export default function Home() {
             ) : (
               <button
                 type="button"
-                onClick={() => setViewMode("memo")}
+                onClick={startNewMemo}
                 className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
               >
-                입력
+                새 메모
               </button>
             )}
           </div>
@@ -738,12 +752,12 @@ export default function Home() {
           <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
             <button
               type="button"
-              onClick={() => setPaymentFilter(paymentFilter === "unpaid" ? "all" : "unpaid")}
+              onClick={toggleUnpaidFilter}
               className={`rounded-full px-3 py-1 text-left transition ${
                 paymentFilter === "unpaid" ? "bg-[#6366F1] text-white" : "bg-[#F1F1F4] text-[#6B6B6B] hover:bg-[#E8E8EC]"
               }`}
             >
-              메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명 · 미입금 {unpaidCount}명
+              메모 {memoMatches.length}건 · 카드 {searchFilteredSummaries.length}명 · 미입금 {searchUnpaidCount}명
             </button>
             <div className="flex gap-2">
               <button
@@ -825,7 +839,7 @@ export default function Home() {
             </div>
             <button
               type="button"
-              onClick={() => setPaymentFilter(paymentFilter === "unpaid" ? "all" : "unpaid")}
+              onClick={toggleUnpaidFilter}
               className={`rounded-lg border px-4 py-3 text-left transition md:px-5 ${
                 paymentFilter === "unpaid"
                   ? "border-[#6366F1] bg-[#F4F4FF] shadow-[0_4px_12px_rgba(99,102,241,0.16)]"
@@ -883,7 +897,7 @@ export default function Home() {
             </div>
           </div>
 
-          <section className="grid gap-4">
+          <section ref={resultSectionRef} className="grid scroll-mt-36 gap-4">
             {filteredSummaries.length > 0 ? (
               filteredSummaries.map((summary) => (
                 <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
