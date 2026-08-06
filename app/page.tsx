@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, KeyboardEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type PurchaseItem = {
   clothingNo?: string;
@@ -23,6 +23,11 @@ type PriceEntry = {
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
 type ViewMode = "memo" | "list";
 type PaymentFilter = "all" | "unpaid";
+type SwipeState = {
+  id: string;
+  startX: number;
+  deltaX: number;
+};
 
 type SavedSession = {
   id: string;
@@ -262,6 +267,20 @@ async function saveRemoteSession(session: SavedSession) {
   });
 }
 
+async function deleteRemoteSession(id: string) {
+  if (!hasSupabase) {
+    return;
+  }
+
+  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+}
+
 export default function Home() {
   const [memo, setMemo] = useState("");
   const [query, setQuery] = useState("");
@@ -274,6 +293,8 @@ export default function Home() {
   const [draftTitle, setDraftTitle] = useState("");
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const [activeMemoMatchIndex, setActiveMemoMatchIndex] = useState(-1);
+  const [swipedSessionId, setSwipedSessionId] = useState<string | null>(null);
+  const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultSectionRef = useRef<HTMLElement>(null);
@@ -581,6 +602,54 @@ export default function Home() {
     }
   };
 
+  const deleteSession = (id: string) => {
+    setSavedSessions((current) => current.filter((session) => session.id !== id));
+    setSwipedSessionId(null);
+    setSwipeState(null);
+
+    if (activeSessionId === id) {
+      setActiveSessionId(null);
+      setMemo("");
+      setPaidNicknames(new Set());
+      setDraftTitle(defaultSessionTitle());
+    }
+
+    deleteRemoteSession(id).catch(() => undefined);
+  };
+
+  const handleSessionPointerDown = (id: string, event: PointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+
+    if (target.closest("button, input")) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSwipeState({ id, startX: event.clientX, deltaX: 0 });
+  };
+
+  const handleSessionPointerMove = (id: string, event: PointerEvent<HTMLElement>) => {
+    if (swipeState?.id !== id) {
+      return;
+    }
+
+    const deltaX = Math.min(0, Math.max(event.clientX - swipeState.startX, -128));
+    setSwipeState({ ...swipeState, deltaX });
+  };
+
+  const handleSessionPointerEnd = (id: string) => {
+    if (swipeState?.id !== id) {
+      return;
+    }
+
+    if (swipeState.deltaX <= -96) {
+      deleteSession(id);
+    } else {
+      setSwipedSessionId(swipeState.deltaX <= -44 ? id : null);
+      setSwipeState(null);
+    }
+  };
+
   const saveCurrentSession = () => {
     const now = new Date();
     const paidList = Array.from(paidNicknames);
@@ -750,15 +819,9 @@ export default function Home() {
             </button>
           </div>
           <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
-            <button
-              type="button"
-              onClick={toggleUnpaidFilter}
-              className={`rounded-full px-3 py-1 text-left transition ${
-                paymentFilter === "unpaid" ? "bg-[#6366F1] text-white" : "bg-[#F1F1F4] text-[#6B6B6B] hover:bg-[#E8E8EC]"
-              }`}
-            >
+            <span className="rounded-full bg-[#F1F1F4] px-3 py-1">
               메모 {memoMatches.length}건 · 카드 {searchFilteredSummaries.length}명 · 미입금 {searchUnpaidCount}명
-            </button>
+            </span>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -790,34 +853,54 @@ export default function Home() {
               const sessionQuantity = sessionSummaries.reduce((sum, summary) => sum + summary.quantity, 0);
 
               return (
-                <article key={session.id} className="rounded-xl border border-[#E8E8EC] bg-white p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <label className="sr-only" htmlFor={`title-${session.id}`}>
-                        리스트 이름
-                      </label>
-                      <input
-                        id={`title-${session.id}`}
-                        value={session.title}
-                        onChange={(event: ChangeEvent<HTMLInputElement>) => updateSessionTitle(session.id, event.target.value)}
-                        className="w-full rounded-md border border-transparent bg-transparent px-0 font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:bg-white focus:px-3 focus:ring-[3px] focus:ring-[#6366F1]/15"
-                      />
-                      <p className="mt-2 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                        {sessionSummaries.length}명 · {sessionQuantity}개 · {won(sessionTotal)} · 입금 {session.paidNicknames.length}명
-                      </p>
-                      <p className="mt-1 font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
-                        저장 {new Date(session.updatedAt).toLocaleString("ko-KR")}
-                      </p>
+                <div key={session.id} className="relative overflow-hidden rounded-xl bg-[#EF4444]">
+                  <button
+                    type="button"
+                    onClick={() => deleteSession(session.id)}
+                    className="absolute inset-y-0 right-0 w-28 font-['DM_Sans'] text-[14px] font-bold text-white"
+                  >
+                    삭제
+                  </button>
+                  <article
+                    onPointerDown={(event) => handleSessionPointerDown(session.id, event)}
+                    onPointerMove={(event) => handleSessionPointerMove(session.id, event)}
+                    onPointerUp={() => handleSessionPointerEnd(session.id)}
+                    onPointerCancel={() => setSwipeState(null)}
+                    className="touch-pan-y rounded-xl border border-[#E8E8EC] bg-white p-5 transition-transform"
+                    style={{
+                      transform: `translateX(${
+                        swipeState?.id === session.id ? swipeState.deltaX : swipedSessionId === session.id ? -112 : 0
+                      }px)`,
+                    }}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <label className="sr-only" htmlFor={`title-${session.id}`}>
+                          리스트 이름
+                        </label>
+                        <input
+                          id={`title-${session.id}`}
+                          value={session.title}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => updateSessionTitle(session.id, event.target.value)}
+                          className="w-full rounded-md border border-transparent bg-transparent px-0 font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:bg-white focus:px-3 focus:ring-[3px] focus:ring-[#6366F1]/15"
+                        />
+                        <p className="mt-2 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                          {sessionSummaries.length}명 · {sessionQuantity}개 · {won(sessionTotal)} · 입금 {session.paidNicknames.length}명
+                        </p>
+                        <p className="mt-1 font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
+                          저장 {new Date(session.updatedAt).toLocaleString("ko-KR")}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadSession(session)}
+                        className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
+                      >
+                        열기
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => loadSession(session)}
-                      className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
-                    >
-                      열기
-                    </button>
-                  </div>
-                </article>
+                  </article>
+                </div>
               );
             })
           ) : (
