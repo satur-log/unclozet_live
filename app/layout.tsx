@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "라이브 커머스 메모 합산",
+  title: "언클로젯 라이브",
   description: "방송 중 메모를 실시간으로 파싱하고 합산하는 iPad 최적화 웹 앱",
 };
 
