@@ -22,6 +22,7 @@ type PriceEntry = {
 
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
 type ViewMode = "memo" | "list";
+type PaymentFilter = "all" | "unpaid";
 
 type SavedSession = {
   id: string;
@@ -266,6 +267,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("memo");
   const [viewMode, setViewMode] = useState<ViewMode>("memo");
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -294,7 +296,7 @@ export default function Home() {
     return nextSummaries;
   }, [sortMode, summaries]);
 
-  const filteredSummaries = useMemo(() => {
+  const searchFilteredSummaries = useMemo(() => {
     const keyword = query.trim().toLowerCase();
 
     if (!keyword) {
@@ -313,9 +315,18 @@ export default function Home() {
     });
   }, [query, sortedSummaries]);
 
+  const filteredSummaries = useMemo(() => {
+    if (paymentFilter === "unpaid") {
+      return searchFilteredSummaries.filter((summary) => !paidNicknames.has(summary.nickname));
+    }
+
+    return searchFilteredSummaries;
+  }, [paidNicknames, paymentFilter, searchFilteredSummaries]);
+
   const grandQuantity = summaries.reduce((sum, summary) => sum + summary.quantity, 0);
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
   const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
+  const unpaidCount = Math.max(summaries.length - paidCount, 0);
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
 
@@ -498,6 +509,10 @@ export default function Home() {
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (viewMode !== "memo") {
+        return;
+      }
+
       const shouldFocusSearch = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
 
       if (shouldFocusSearch) {
@@ -509,7 +524,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [viewMode]);
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
@@ -590,6 +605,7 @@ export default function Home() {
     setPaidNicknames(new Set(session.paidNicknames));
     setActiveSessionId(session.id);
     setViewMode("memo");
+    setPaymentFilter("all");
     setQuery("");
   };
 
@@ -618,6 +634,7 @@ export default function Home() {
     setPaidNicknames(new Set());
     setActiveSessionId(null);
     setDraftTitle(defaultSessionTitle());
+    setPaymentFilter("all");
     setQuery("");
     setViewMode("memo");
     requestAnimationFrame(focusTextareaEnd);
@@ -668,77 +685,87 @@ export default function Home() {
                 type="button"
                 onClick={saveCurrentSession}
                 disabled={!memo.trim()}
-                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
               >
                 저장
+              </button>
+            ) : null}
+            {viewMode === "memo" ? (
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+              >
+                리스트
               </button>
             ) : (
               <button
                 type="button"
-                onClick={startNewMemo}
-                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+                onClick={() => setViewMode("memo")}
+                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
               >
-                새 메모
+                입력
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setViewMode(viewMode === "memo" ? "list" : "memo")}
-              className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
-            >
-              {viewMode === "memo" ? "리스트" : "입력"}
-            </button>
           </div>
         </div>
       </header>
 
-      <div className="sticky top-0 z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur md:px-6">
-        <div className="mx-auto flex max-w-7xl items-center gap-3">
-          <label className="sr-only" htmlFor="search">
-            검색
-          </label>
-          <input
-            ref={searchRef}
-            id="search"
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            className="h-12 flex-1 rounded-xl border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[15px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
-            placeholder="닉네임 또는 금액 검색"
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            onClick={() => setQuery("")}
-            className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
-          >
-            지우기
-          </button>
-        </div>
-        <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
-          <span className="rounded-full bg-[#F1F1F4] px-3 py-1">
-            메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명 · 입금 {paidCount}명
-          </span>
-          <div className="flex gap-2">
+      {viewMode === "memo" ? (
+        <div className="sticky top-0 z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur md:px-6">
+          <div className="mx-auto flex max-w-7xl items-center gap-3">
+            <label className="sr-only" htmlFor="search">
+              검색
+            </label>
+            <input
+              ref={searchRef}
+              id="search"
+              value={query}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              className="h-12 flex-1 rounded-xl border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[15px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
+              placeholder="닉네임 또는 금액 검색"
+              autoComplete="off"
+            />
             <button
               type="button"
-              onClick={() => moveMemoMatch(-1)}
-              disabled={memoMatches.length === 0}
-              className="h-8 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:bg-[#F6F6F8] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              onClick={() => setQuery("")}
+              className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
             >
-              이전
-            </button>
-            <button
-              type="button"
-              onClick={() => moveMemoMatch(1)}
-              disabled={memoMatches.length === 0}
-              className="h-8 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:bg-[#F6F6F8] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
-            >
-              다음
+              지우기
             </button>
           </div>
+          <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
+            <button
+              type="button"
+              onClick={() => setPaymentFilter(paymentFilter === "unpaid" ? "all" : "unpaid")}
+              className={`rounded-full px-3 py-1 text-left transition ${
+                paymentFilter === "unpaid" ? "bg-[#6366F1] text-white" : "bg-[#F1F1F4] text-[#6B6B6B] hover:bg-[#E8E8EC]"
+              }`}
+            >
+              메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명 · 미입금 {unpaidCount}명
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => moveMemoMatch(-1)}
+                disabled={memoMatches.length === 0}
+                className="h-8 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:bg-[#F6F6F8] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              >
+                이전
+              </button>
+              <button
+                type="button"
+                onClick={() => moveMemoMatch(1)}
+                disabled={memoMatches.length === 0}
+                className="h-8 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B] transition hover:-translate-y-px hover:bg-[#F6F6F8] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              >
+                다음
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {viewMode === "list" ? (
         <section className="mx-auto grid max-w-7xl gap-4 px-3 pt-5 md:px-6 md:pt-8">
@@ -787,7 +814,7 @@ export default function Home() {
         </section>
       ) : (
         <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
-          <div className="grid grid-cols-3 gap-3 md:gap-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-5">
             <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">고객</p>
               <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{summaries.length}명</p>
@@ -796,6 +823,18 @@ export default function Home() {
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">수량</p>
               <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{grandQuantity}개</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setPaymentFilter(paymentFilter === "unpaid" ? "all" : "unpaid")}
+              className={`rounded-lg border px-4 py-3 text-left transition md:px-5 ${
+                paymentFilter === "unpaid"
+                  ? "border-[#6366F1] bg-[#F4F4FF] shadow-[0_4px_12px_rgba(99,102,241,0.16)]"
+                  : "border-[#E8E8EC] bg-white hover:-translate-y-px hover:border-[#6366F1]"
+              }`}
+            >
+              <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">미입금</p>
+              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#EF4444] md:text-[32px]">{unpaidCount}명</p>
+            </button>
             <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">합계</p>
               <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#6366F1] md:text-[32px]">{won(grandTotal)}</p>
@@ -815,6 +854,7 @@ export default function Home() {
             <div>
               <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
                 검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
+                {paymentFilter === "unpaid" ? " · 미입금만 보기" : ""}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
