@@ -326,11 +326,15 @@ export default function Home() {
   const [swipedSessionId, setSwipedSessionId] = useState<string | null>(null);
   const [swipeState, setSwipeState] = useState<SwipeState | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [isGnbVisible, setIsGnbVisible] = useState(true);
+  const [gnbHeight, setGnbHeight] = useState(0);
+  const headerRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resultSectionRef = useRef<HTMLElement>(null);
   const savedSessionsRef = useRef<SavedSession[]>([]);
   const hasInitializedHistoryRef = useRef(false);
+  const lastScrollYRef = useRef(0);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
   const sortedSummaries = useMemo(() => {
@@ -439,6 +443,49 @@ export default function Home() {
   useEffect(() => {
     savedSessionsRef.current = savedSessions;
   }, [savedSessions]);
+
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      setGnbHeight(headerRef.current?.offsetHeight ?? 0);
+    };
+
+    updateHeaderHeight();
+    window.addEventListener("resize", updateHeaderHeight);
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && headerRef.current ? new ResizeObserver(updateHeaderHeight) : null;
+
+    if (headerRef.current) {
+      resizeObserver?.observe(headerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateHeaderHeight);
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    lastScrollYRef.current = window.scrollY;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDelta = currentScrollY - lastScrollYRef.current;
+
+      if (currentScrollY < 8) {
+        setIsGnbVisible(true);
+      } else if (scrollDelta > 8) {
+        setIsGnbVisible(false);
+      } else if (scrollDelta < -4) {
+        setIsGnbVisible(true);
+      }
+
+      lastScrollYRef.current = currentScrollY;
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     const savedMemo = window.localStorage.getItem(MEMO_STORAGE_KEY);
@@ -883,8 +930,13 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-dvh bg-[#FAFAFA] pb-8 text-[#0A0A0A]">
-      <header className="border-b border-[#E8E8EC] bg-white px-3 py-3 md:px-6">
+    <main className="min-h-dvh bg-[#FAFAFA] pb-8 text-[#0A0A0A]" style={{ paddingTop: gnbHeight }}>
+      <header
+        ref={headerRef}
+        className={`fixed inset-x-0 top-0 z-30 border-b border-[#E8E8EC] bg-white px-3 py-3 transition-transform duration-200 md:px-6 ${
+          isGnbVisible ? "translate-y-0" : "-translate-y-full"
+        }`}
+      >
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="truncate font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A] md:text-[32px]">
@@ -931,7 +983,10 @@ export default function Home() {
       </header>
 
       {viewMode === "memo" ? (
-        <div className="sticky top-0 z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur md:px-6">
+        <div
+          className="sticky z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur transition-[top] duration-200 md:px-6"
+          style={{ top: isGnbVisible ? gnbHeight : 0 }}
+        >
           <div className="mx-auto flex max-w-7xl items-center gap-3">
             <label className="sr-only" htmlFor="search">
               검색
