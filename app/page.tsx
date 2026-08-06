@@ -254,8 +254,8 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-dvh pb-6 text-[#171814]">
-      <div className="sticky top-0 z-20 border-b border-[#d9ddcf] bg-[#f7f8f3]/95 px-3 py-3 shadow-sm backdrop-blur md:px-5">
+    <main className="min-h-dvh bg-white pb-8 text-black">
+      <div className="sticky top-0 z-20 border-b-[5px] border-black bg-white px-3 py-3 md:px-6">
         <div className="mx-auto flex max-w-6xl items-center gap-2">
           <label className="sr-only" htmlFor="search">
             검색
@@ -266,20 +266,20 @@ export default function Home() {
             value={query}
             onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
             onKeyDown={handleSearchKeyDown}
-            className="h-12 flex-1 rounded-md border border-[#b7c2aa] bg-white px-4 text-[17px] font-semibold outline-none transition focus:border-[#0f766e] focus:ring-4 focus:ring-[#0f766e]/15"
+            className="h-12 flex-1 rounded-none border-[3px] border-black bg-[#f0f0f0] px-3 font-mono text-[15px] text-black outline-none hover:bg-[#e8e8e8] focus:border-[5px]"
             placeholder="닉네임 또는 금액 검색"
             autoComplete="off"
           />
           <button
             type="button"
             onClick={() => setQuery("")}
-            className="h-12 rounded-md border border-[#b7c2aa] bg-white px-4 text-sm font-bold text-[#33423b] active:scale-[0.98]"
+            className="h-12 rounded-none border-[3px] border-black bg-white px-4 text-xs font-black uppercase tracking-[2px] text-black hover:bg-black hover:text-white active:border-[5px]"
           >
             지우기
           </button>
         </div>
-        <div className="mx-auto mt-2 flex max-w-6xl items-center justify-between gap-2 text-sm font-bold text-[#667065]">
-          <span>
+        <div className="mx-auto mt-2 flex max-w-6xl items-center justify-between gap-2 font-mono text-[12px] text-black">
+          <span className="border-[2px] border-black bg-white px-2 py-1 uppercase tracking-[1px]">
             메모 {memoMatches.length}건 · 카드 {filteredSummaries.length}명
           </span>
           <div className="flex gap-2">
@@ -287,7 +287,7 @@ export default function Home() {
               type="button"
               onClick={() => moveMemoMatch(-1)}
               disabled={memoMatches.length === 0}
-              className="h-9 rounded-md border border-[#b7c2aa] bg-white px-3 text-[#33423b] disabled:cursor-not-allowed disabled:opacity-45"
+              className="h-9 rounded-none border-[3px] border-black bg-white px-3 text-xs font-black uppercase tracking-[2px] text-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:border-[#cccccc] disabled:bg-[#f5f5f5] disabled:text-[#777777]"
             >
               이전
             </button>
@@ -295,7 +295,7 @@ export default function Home() {
               type="button"
               onClick={() => moveMemoMatch(1)}
               disabled={memoMatches.length === 0}
-              className="h-9 rounded-md border border-[#b7c2aa] bg-white px-3 text-[#33423b] disabled:cursor-not-allowed disabled:opacity-45"
+              className="h-9 rounded-none border-[3px] border-black bg-white px-3 text-xs font-black uppercase tracking-[2px] text-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:border-[#cccccc] disabled:bg-[#f5f5f5] disabled:text-[#777777]"
             >
               다음
             </button>
@@ -303,19 +303,19 @@ export default function Home() {
         </div>
       </div>
 
-      <section className="mx-auto grid max-w-6xl gap-4 px-3 pt-4 md:px-5">
-        <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-md border border-[#d9ddcf] bg-white px-3 py-2">
-            <p className="text-xs font-bold text-[#667065]">고객</p>
-            <p className="text-xl font-black">{summaries.length}명</p>
+      <section className="mx-auto grid max-w-6xl gap-6 px-3 pt-6 md:px-6">
+        <div className="grid grid-cols-3 gap-2 md:gap-4">
+          <div className="rounded-none border-[3px] border-black bg-white px-3 py-3 md:px-5">
+            <p className="font-['Archivo_Black'] text-[12px] uppercase tracking-[1px] text-black">고객</p>
+            <p className="font-['Archivo_Black'] text-2xl leading-none text-black md:text-[32px]">{summaries.length}명</p>
           </div>
-          <div className="rounded-md border border-[#d9ddcf] bg-white px-3 py-2">
-            <p className="text-xs font-bold text-[#667065]">수량</p>
-            <p className="text-xl font-black">{grandQuantity}개</p>
+          <div className="rounded-none border-[3px] border-black bg-white px-3 py-3 md:px-5">
+            <p className="font-['Archivo_Black'] text-[12px] uppercase tracking-[1px] text-black">수량</p>
+            <p className="font-['Archivo_Black'] text-2xl leading-none text-black md:text-[32px]">{grandQuantity}개</p>
           </div>
-          <div className="rounded-md border border-[#d9ddcf] bg-white px-3 py-2">
-            <p className="text-xs font-bold text-[#667065]">합계</p>
-            <p className="text-xl font-black">{won(grandTotal)}</p>
+          <div className="rounded-none border-[5px] border-black bg-black px-3 py-3 text-white md:px-5">
+            <p className="font-['Archivo_Black'] text-[12px] uppercase tracking-[1px]">합계</p>
+            <p className="font-['Archivo_Black'] text-2xl leading-none md:text-[32px]">{won(grandTotal)}</p>
           </div>
         </div>
 
@@ -323,14 +323,14 @@ export default function Home() {
           ref={textareaRef}
           value={memo}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
-          className="min-h-[70dvh] w-full rounded-md border border-[#b7c2aa] bg-white p-4 text-[18px] leading-8 shadow-sm outline-none transition focus:border-[#0f766e] focus:ring-4 focus:ring-[#0f766e]/15 md:min-h-[74dvh] md:text-[20px]"
+          className="min-h-[70dvh] w-full rounded-none border-[5px] border-black bg-[#f0f0f0] p-3 font-mono text-[18px] leading-8 text-black outline-none hover:bg-[#e8e8e8] focus:bg-white md:min-h-[74dvh] md:p-5 md:text-[20px]"
           placeholder="예: 홍길동: 1.5 + 2.3 + 0.8"
           spellCheck={false}
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-y-[3px] border-black py-3">
           <div>
-            <p className="text-sm font-bold text-[#667065]">
+            <p className="font-mono text-[13px] font-bold uppercase tracking-[1px] text-black">
               검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
             </p>
           </div>
@@ -338,33 +338,33 @@ export default function Home() {
             type="button"
             onClick={handleDownloadCsv}
             disabled={summaries.length === 0}
-            className="h-11 rounded-md bg-[#0f766e] px-5 text-sm font-black text-white shadow-sm transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-[#9aa7a2]"
+            className="h-12 rounded-none border-[3px] border-black bg-black px-6 text-sm font-black uppercase tracking-[2px] text-white hover:bg-white hover:text-black active:border-[5px] disabled:cursor-not-allowed disabled:border-[#cccccc] disabled:bg-[#f5f5f5] disabled:text-[#777777]"
           >
             엑셀 다운로드
           </button>
         </div>
 
-        <section className="grid gap-3">
+        <section className="grid gap-4">
           {filteredSummaries.length > 0 ? (
             filteredSummaries.map((summary) => (
-              <article key={summary.nickname} className="rounded-md border border-[#d9ddcf] bg-white p-4 shadow-sm">
+              <article key={summary.nickname} className="rounded-none border-[3px] border-black bg-white p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-black">{summary.nickname}</h2>
-                    <p className="mt-1 text-sm font-bold text-[#667065]">
+                    <h2 className="font-['Archivo_Black'] text-[28px] leading-none text-black md:text-[32px]">{summary.nickname}</h2>
+                    <p className="mt-2 font-mono text-[13px] font-bold uppercase tracking-[1px] text-black">
                       총 {summary.quantity}개 · {won(summary.total)}
                     </p>
                   </div>
-                  <div className="rounded-md bg-[#eef4ee] px-3 py-2 text-right">
-                    <p className="text-xs font-bold text-[#667065]">총액</p>
-                    <p className="text-lg font-black text-[#0f766e]">{won(summary.total)}</p>
+                  <div className="rounded-none border-[3px] border-black bg-black px-3 py-2 text-right text-white">
+                    <p className="font-['Archivo_Black'] text-[11px] uppercase tracking-[1px]">총액</p>
+                    <p className="font-['Archivo_Black'] text-lg leading-none">{won(summary.total)}</p>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {summary.items.map((item, index) => (
                     <span
                       key={`${summary.nickname}-${item.clothingNo}-${index}`}
-                      className="rounded-md border border-[#d9ddcf] bg-[#fafbf8] px-3 py-2 text-sm font-bold"
+                      className="rounded-none border-[2px] border-black bg-white px-3 py-1 font-mono text-[13px] font-bold"
                     >
                       {itemLabel(item)}
                     </span>
@@ -373,7 +373,7 @@ export default function Home() {
               </article>
             ))
           ) : (
-            <div className="rounded-md border border-dashed border-[#b7c2aa] bg-white p-6 text-center text-sm font-bold text-[#667065]">
+            <div className="rounded-none border-[3px] border-dashed border-black bg-white p-6 text-center font-mono text-[13px] font-bold uppercase tracking-[1px] text-black">
               표시할 결과가 없습니다.
             </div>
           )}
