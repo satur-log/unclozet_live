@@ -436,6 +436,8 @@ export default function Home() {
   const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
   const unpaidCount = Math.max(summaries.length - paidCount, 0);
   const searchUnpaidCount = searchFilteredSummaries.filter((summary) => !paidNicknames.has(summary.nickname)).length;
+  const allFilteredPaid =
+    filteredSummaries.length > 0 && filteredSummaries.every((summary) => paidNicknames.has(summary.nickname));
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
 
@@ -788,6 +790,22 @@ export default function Home() {
       } else {
         next.add(nickname);
       }
+
+      return next;
+    });
+  };
+
+  const toggleAllFilteredPaid = () => {
+    setPaidNicknames((current) => {
+      const next = new Set(current);
+
+      filteredSummaries.forEach((summary) => {
+        if (allFilteredPaid) {
+          next.delete(summary.nickname);
+        } else {
+          next.add(summary.nickname);
+        }
+      });
 
       return next;
     });
@@ -1237,11 +1255,19 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
-            <div>
-              <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+            <div className="flex items-center gap-3">
+              <input
+                id="select-all-paid"
+                type="checkbox"
+                checked={allFilteredPaid}
+                onChange={toggleAllFilteredPaid}
+                disabled={filteredSummaries.length === 0}
+                className="size-5 rounded border border-[#E8E8EC] accent-[#6366F1] disabled:cursor-not-allowed disabled:opacity-40"
+              />
+              <label htmlFor="select-all-paid" className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
                 검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
                 {paymentFilter === "unpaid" ? " · 미입금만 보기" : ""}
-              </p>
+              </label>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="sr-only" htmlFor="sort">
