@@ -5,6 +5,7 @@ import { ChangeEvent, KeyboardEvent, PointerEvent, useCallback, useEffect, useMe
 type PurchaseItem = {
   clothingNo?: string;
   rawPrice: string;
+  quantity: number;
   price: number;
 };
 
@@ -18,6 +19,7 @@ type BuyerSummary = {
 type PriceEntry = {
   clothingNo?: string;
   rawPrice: string;
+  quantity: number;
 };
 
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
@@ -74,53 +76,76 @@ function normalizePrice(value: string) {
   return Math.round(numericValue * 10000);
 }
 
+function parseMemoLine(line: string) {
+  const match = line.match(/^\s*(.*?)\s*[:\-–—]\s*(.+?)\s*$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const nickname = match[1].trim();
+  const content = match[2].trim();
+
+  if (!nickname || !content) {
+    return null;
+  }
+
+  const numberedMatches = Array.from(content.matchAll(/(\d+)\s*번\s*([0-9]+(?:[.,][0-9]+)?)(?:\s*\*\s*(\d+))?/g));
+  const priceEntries: PriceEntry[] =
+    numberedMatches.length > 0
+      ? numberedMatches.map((match) => ({
+          clothingNo: match[1],
+          rawPrice: match[2].replace(",", "."),
+          quantity: Number(match[3] ?? "1"),
+        }))
+      : Array.from(content.matchAll(/([0-9]+(?:[.,][0-9]+)?)(?:\s*\*\s*(\d+))?/g)).map((match) => ({
+          rawPrice: match[1].replace(",", "."),
+          quantity: Number(match[2] ?? "1"),
+        }));
+
+  if (priceEntries.length === 0) {
+    return null;
+  }
+
+  const items = priceEntries.map((entry) => ({
+    clothingNo: entry.clothingNo,
+    rawPrice: entry.rawPrice,
+    quantity: Number.isFinite(entry.quantity) && entry.quantity > 0 ? Math.floor(entry.quantity) : 1,
+    price: normalizePrice(entry.rawPrice),
+  }));
+
+  return {
+    nickname,
+    items,
+    quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+    total: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+  };
+}
+
 function parseMemo(text: string): BuyerSummary[] {
   const summaries = new Map<string, BuyerSummary>();
 
   text.split("\n").forEach((line) => {
-    const [nicknamePart, ...contentParts] = line.split(":");
-    const nickname = nicknamePart?.trim();
-    const content = contentParts.join(":").trim();
+    const parsedLine = parseMemoLine(line);
 
-    if (!nickname || !content) {
+    if (!parsedLine) {
       return;
     }
 
-    const numberedMatches = Array.from(content.matchAll(/(\d+)\s*번\s*([0-9]+(?:[.,][0-9]+)?)/g));
-    const priceEntries: PriceEntry[] =
-      numberedMatches.length > 0
-        ? numberedMatches.map((match) => ({
-            clothingNo: match[1],
-            rawPrice: match[2].replace(",", "."),
-          }))
-        : Array.from(content.matchAll(/[0-9]+(?:[.,][0-9]+)?/g)).map((match) => ({
-            rawPrice: match[0].replace(",", "."),
-          }));
-
-    if (priceEntries.length === 0) {
-      return;
-    }
-
-    const previous = summaries.get(nickname) ?? {
-      nickname,
+    const previous = summaries.get(parsedLine.nickname) ?? {
+      nickname: parsedLine.nickname,
       quantity: 0,
       total: 0,
       items: [],
     };
 
-    priceEntries.forEach((entry) => {
-      const price = normalizePrice(entry.rawPrice);
-
-      previous.items.push({
-        clothingNo: entry.clothingNo,
-        rawPrice: entry.rawPrice,
-        price,
-      });
-      previous.quantity += 1;
-      previous.total += price;
+    parsedLine.items.forEach((item) => {
+      previous.items.push(item);
+      previous.quantity += item.quantity;
+      previous.total += item.price * item.quantity;
     });
 
-    summaries.set(nickname, previous);
+    summaries.set(parsedLine.nickname, previous);
   });
 
   return Array.from(summaries.values());
@@ -135,7 +160,30 @@ function won(value: number) {
 }
 
 function itemLabel(item: PurchaseItem) {
-  return item.clothingNo ? `${item.clothingNo}번 ${won(item.price)}` : won(item.price);
+  const priceLabel = item.clothingNo ? `${item.clothingNo}번 ${won(item.price)}` : won(item.price);
+
+  return item.quantity > 1 ? `${priceLabel} x ${item.quantity}` : priceLabel;
+}
+
+function numberWithComma(value: number) {
+  return new Intl.NumberFormat("ko-KR", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function memoWithLineTotals(text: string) {
+  return text
+    .split("\n")
+    .map((line) => {
+      const parsedLine = parseMemoLine(line);
+
+      if (!parsedLine) {
+        return line;
+      }
+
+      return `${line.trim()} = ${numberWithComma(parsedLine.total)}`;
+    })
+    .join("\n");
 }
 
 function escapeCsvCell(value: string | number) {
@@ -313,6 +361,7 @@ async function deleteRemoteSession(id: string) {
 
 export default function Home() {
   const [memo, setMemo] = useState("");
+  const [generatedMemo, setGeneratedMemo] = useState("");
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("memo");
   const [viewMode, setViewMode] = useState<ViewMode>("memo");
@@ -501,6 +550,7 @@ export default function Home() {
 
     if (routeSession) {
       setMemo(routeSession.memo);
+      setGeneratedMemo(memoWithLineTotals(routeSession.memo));
       setPaidNicknames(new Set(routeSession.paidNicknames));
       setActiveSessionId(routeSession.id);
     } else if (savedMemo) {
@@ -545,6 +595,7 @@ export default function Home() {
 
           if (remoteRouteSession) {
             setMemo(remoteRouteSession.memo);
+            setGeneratedMemo(memoWithLineTotals(remoteRouteSession.memo));
             setPaidNicknames(new Set(remoteRouteSession.paidNicknames));
             setActiveSessionId(remoteRouteSession.id);
           }
@@ -666,6 +717,7 @@ export default function Home() {
 
         if (session) {
           setMemo(session.memo);
+          setGeneratedMemo(memoWithLineTotals(session.memo));
           setPaidNicknames(new Set(session.paidNicknames));
         }
 
@@ -795,6 +847,7 @@ export default function Home() {
     if (activeSessionId === id) {
       setActiveSessionId(null);
       setMemo("");
+      setGeneratedMemo("");
       setPaidNicknames(new Set());
       setDraftTitle(defaultSessionTitle());
     }
@@ -868,6 +921,7 @@ export default function Home() {
 
   const loadSession = (session: SavedSession) => {
     setMemo(session.memo);
+    setGeneratedMemo(memoWithLineTotals(session.memo));
     setPaidNicknames(new Set(session.paidNicknames));
     setActiveSessionId(session.id);
     navigateToView("memo", session.id);
@@ -897,6 +951,7 @@ export default function Home() {
 
   const startNewMemo = () => {
     setMemo("");
+    setGeneratedMemo("");
     setPaidNicknames(new Set());
     setActiveSessionId(null);
     setDraftTitle(defaultSessionTitle());
@@ -904,6 +959,18 @@ export default function Home() {
     setQuery("");
     navigateToView("memo", null);
     requestAnimationFrame(focusTextareaEnd);
+  };
+
+  const handleGenerateMemoWithTotals = () => {
+    setGeneratedMemo(memoWithLineTotals(memo));
+  };
+
+  const handleCopyGeneratedMemo = () => {
+    if (!generatedMemo) {
+      return;
+    }
+
+    navigator.clipboard?.writeText(generatedMemo).catch(() => undefined);
   };
 
   const handleDownloadCsv = () => {
@@ -1129,14 +1196,45 @@ export default function Home() {
             </div>
           </div>
 
-          <textarea
-            ref={textareaRef}
-            value={memo}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
-            className="min-h-[70dvh] w-full rounded-xl border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[17px] leading-8 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-[74dvh] md:p-5 md:text-[19px]"
-            placeholder="예: 홍길동: 1.5 + 2.3 + 0.8"
-            spellCheck={false}
-          />
+          <div className="grid gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4">
+            <textarea
+              ref={textareaRef}
+              value={memo}
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
+              className="min-h-40 w-full resize-y rounded-lg border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[16px] leading-7 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-48 md:text-[17px]"
+              placeholder="예: 홍길동 - 1.5 + 2.0 + 0.5"
+              spellCheck={false}
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleGenerateMemoWithTotals}
+                disabled={!memo.trim()}
+                className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+              >
+                확인
+              </button>
+            </div>
+            {generatedMemo ? (
+              <div className="grid gap-2 border-t border-[#E8E8EC] pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">합계 포함 복사용 메모</p>
+                  <button
+                    type="button"
+                    onClick={handleCopyGeneratedMemo}
+                    className="h-9 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#0A0A0A] transition hover:border-[#6366F1] hover:text-[#6366F1]"
+                  >
+                    복사
+                  </button>
+                </div>
+                <textarea
+                  value={generatedMemo}
+                  readOnly
+                  className="min-h-36 w-full resize-y rounded-lg border border-[#E8E8EC] bg-[#FAFAFA] p-4 font-['JetBrains_Mono'] text-[15px] leading-7 text-[#0A0A0A] outline-none"
+                />
+              </div>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
             <div>
