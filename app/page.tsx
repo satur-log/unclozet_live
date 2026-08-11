@@ -90,7 +90,7 @@ function parseMemoLine(line: string) {
     return null;
   }
 
-  const numberedMatches = Array.from(content.matchAll(/(\d+)\s*번\s*([0-9]+(?:[.,][0-9]+)?)(?:\s*\*\s*(\d+))?/g));
+  const numberedMatches = Array.from(content.matchAll(/(\d+)\s*번\s*([0-9]+(?:[.,][0-9]+)?)(?:\s*[*xX×]\s*(\d+))?/g));
   const priceEntries: PriceEntry[] =
     numberedMatches.length > 0
       ? numberedMatches.map((match) => ({
@@ -98,7 +98,7 @@ function parseMemoLine(line: string) {
           rawPrice: match[2].replace(",", "."),
           quantity: Number(match[3] ?? "1"),
         }))
-      : Array.from(content.matchAll(/([0-9]+(?:[.,][0-9]+)?)(?:\s*\*\s*(\d+))?/g)).map((match) => ({
+      : Array.from(content.matchAll(/([0-9]+(?:[.,][0-9]+)?)(?:\s*[*xX×]\s*(\d+))?/g)).map((match) => ({
           rawPrice: match[1].replace(",", "."),
           quantity: Number(match[2] ?? "1"),
         }));
