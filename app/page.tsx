@@ -1,6 +1,16 @@
 "use client";
 
 import { ChangeEvent, KeyboardEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ShippingWorkspace, {
+  ShippingCounts,
+  ShippingSummary,
+  ShippingTab,
+} from "./shipping/ShippingWorkspace";
+import {
+  canonicalInstagramId,
+  readShippingRounds,
+  ShippingRound,
+} from "./shipping/shipping-data";
 
 type PurchaseItem = {
   clothingNo?: string;
@@ -24,7 +34,6 @@ type PriceEntry = {
 
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
 type ViewMode = "memo" | "list";
-type PaymentFilter = "all" | "unpaid";
 type AppHistoryState = {
   unclozetView?: ViewMode;
   activeSessionId?: string | null;
@@ -201,6 +210,13 @@ function defaultSessionTitle(date = new Date()) {
   }).format(date);
 }
 
+function localDateId(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function pruneOldSessions(sessions: SavedSession[]) {
   const threshold = Date.now() - ONE_WEEK_MS;
   return sessions.filter((session) => new Date(session.updatedAt).getTime() >= threshold);
@@ -365,7 +381,10 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("memo");
   const [viewMode, setViewMode] = useState<ViewMode>("memo");
-  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
+  const [shippingTab, setShippingTab] = useState<ShippingTab>("waiting");
+  const [shippingCounts, setShippingCounts] = useState<ShippingCounts>({ waiting: 0, ready: 0, completed: 0 });
+  const [shippingRounds, setShippingRounds] = useState<ShippingRound[]>([]);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -377,13 +396,14 @@ export default function Home() {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [isGnbVisible, setIsGnbVisible] = useState(true);
   const [gnbHeight, setGnbHeight] = useState(0);
+  const [isSaveToastVisible, setIsSaveToastVisible] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const resultSectionRef = useRef<HTMLElement>(null);
   const savedSessionsRef = useRef<SavedSession[]>([]);
   const hasInitializedHistoryRef = useRef(false);
   const lastScrollYRef = useRef(0);
+  const saveToastTimerRef = useRef<number | null>(null);
 
   const summaries = useMemo(() => parseMemo(memo), [memo]);
   const sortedSummaries = useMemo(() => {
@@ -423,23 +443,20 @@ export default function Home() {
     });
   }, [query, sortedSummaries]);
 
-  const filteredSummaries = useMemo(() => {
-    if (paymentFilter === "unpaid") {
-      return searchFilteredSummaries.filter((summary) => !paidNicknames.has(summary.nickname));
-    }
-
-    return searchFilteredSummaries;
-  }, [paidNicknames, paymentFilter, searchFilteredSummaries]);
-
   const grandQuantity = summaries.reduce((sum, summary) => sum + summary.quantity, 0);
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
-  const paidCount = summaries.filter((summary) => paidNicknames.has(summary.nickname)).length;
-  const unpaidCount = Math.max(summaries.length - paidCount, 0);
-  const searchUnpaidCount = searchFilteredSummaries.filter((summary) => !paidNicknames.has(summary.nickname)).length;
-  const allFilteredPaid =
-    filteredSummaries.length > 0 && filteredSummaries.every((summary) => paidNicknames.has(summary.nickname));
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
+  const shippingDateId = localDateId(activeSession ? new Date(activeSession.createdAt) : new Date());
+  const shippingSummaries = useMemo<ShippingSummary[]>(
+    () => searchFilteredSummaries.map((summary) => ({
+      instagramId: summary.nickname,
+      quantity: summary.quantity,
+      totalLabel: won(summary.total),
+      items: summary.items.map(itemLabel),
+    })),
+    [searchFilteredSummaries],
+  );
 
   const memoMatches = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -572,6 +589,7 @@ export default function Home() {
     }
 
     setSavedSessions(sortSavedSessions(localSessions));
+    setShippingRounds(readShippingRounds());
     window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(sortSavedSessions(localSessions)));
 
     if (initialRoute.viewMode === "list") {
@@ -690,25 +708,6 @@ export default function Home() {
   }, [activeSessionId, hasLoadedStorage, memo, paidNicknames]);
 
   useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (viewMode !== "memo") {
-        return;
-      }
-
-      const shouldFocusSearch = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
-
-      if (shouldFocusSearch) {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [viewMode]);
-
-  useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
       const state = event.state as AppHistoryState | null;
 
@@ -725,8 +724,9 @@ export default function Home() {
 
         setViewMode(state.unclozetView);
         setActiveSessionId(state.activeSessionId ?? null);
-        setPaymentFilter("all");
+        setShippingTab("waiting");
         setQuery("");
+        setIsSearchOpen(false);
         setDeleteTargetId(null);
         setSwipeState(null);
         setSwipedSessionId(null);
@@ -756,7 +756,9 @@ export default function Home() {
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
+      event.preventDefault();
       setQuery("");
+      setIsSearchOpen(false);
       requestAnimationFrame(focusTextareaEnd);
       return;
     }
@@ -781,49 +783,12 @@ export default function Home() {
     requestAnimationFrame(() => selectMemoMatch(nextIndex));
   };
 
-  const togglePaid = (nickname: string) => {
-    setPaidNicknames((current) => {
-      const next = new Set(current);
-
-      if (next.has(nickname)) {
-        next.delete(nickname);
-      } else {
-        next.add(nickname);
-      }
-
-      return next;
-    });
-  };
-
-  const toggleAllFilteredPaid = () => {
-    setPaidNicknames((current) => {
-      const next = new Set(current);
-
-      filteredSummaries.forEach((summary) => {
-        if (allFilteredPaid) {
-          next.delete(summary.nickname);
-        } else {
-          next.add(summary.nickname);
-        }
-      });
-
-      return next;
-    });
-  };
-
-  const toggleUnpaidFilter = () => {
-    const nextFilter = paymentFilter === "unpaid" ? "all" : "unpaid";
-
-    setPaymentFilter(nextFilter);
-
-    if (nextFilter === "unpaid") {
-      requestAnimationFrame(() => {
-        resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    }
-  };
-
   const navigateToView = (nextViewMode: ViewMode, nextActiveSessionId = activeSessionId) => {
+    if (nextViewMode === "list") {
+      setQuery("");
+      setIsSearchOpen(false);
+      setShippingRounds(readShippingRounds());
+    }
     setViewMode(nextViewMode);
     window.history.pushState(
       { ...(window.history.state ?? {}), unclozetView: nextViewMode, activeSessionId: nextActiveSessionId },
@@ -906,6 +871,15 @@ export default function Home() {
     const now = new Date();
     const paidList = Array.from(paidNicknames);
 
+    if (saveToastTimerRef.current) {
+      window.clearTimeout(saveToastTimerRef.current);
+    }
+    setIsSaveToastVisible(true);
+    saveToastTimerRef.current = window.setTimeout(() => {
+      setIsSaveToastVisible(false);
+      saveToastTimerRef.current = null;
+    }, 1600);
+
     if (activeSession) {
       const nextSession = {
         ...activeSession,
@@ -943,7 +917,7 @@ export default function Home() {
     setPaidNicknames(new Set(session.paidNicknames));
     setActiveSessionId(session.id);
     navigateToView("memo", session.id);
-    setPaymentFilter("all");
+    setShippingTab("waiting");
     setQuery("");
   };
 
@@ -973,7 +947,7 @@ export default function Home() {
     setPaidNicknames(new Set());
     setActiveSessionId(null);
     setDraftTitle(defaultSessionTitle());
-    setPaymentFilter("all");
+    setShippingTab("waiting");
     setQuery("");
     navigateToView("memo", null);
     requestAnimationFrame(focusTextareaEnd);
@@ -991,28 +965,22 @@ export default function Home() {
     navigator.clipboard?.writeText(generatedMemo).catch(() => undefined);
   };
 
-  const handleDownloadCsv = () => {
-    const header = ["닉네임", "총수량", "총금액", "입금여부", "상세내역"];
-    const rows = summaries.map((summary) => [
-      summary.nickname,
-      summary.quantity,
-      summary.total,
-      paidNicknames.has(summary.nickname) ? "입금완료" : "미입금",
-      summary.items.map(itemLabel).join(" + "),
-    ]);
-    const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(",")).join("\n");
-    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 10);
+  const toggleSearch = () => {
+    if (isSearchOpen) {
+      setIsSearchOpen(false);
+      setQuery("");
+      requestAnimationFrame(focusTextareaEnd);
+      return;
+    }
 
-    link.href = url;
-    link.download = `live-commerce-summary-${timestamp}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setIsSearchOpen(true);
+    requestAnimationFrame(() => searchRef.current?.focus());
   };
+
+  const handleShippingCountsChange = useCallback((counts: ShippingCounts) => {
+    setShippingCounts(counts);
+    setShippingRounds(readShippingRounds());
+  }, []);
 
   return (
     <main className="min-h-dvh bg-[#FAFAFA] pb-8 text-[#0A0A0A]" style={{ paddingTop: gnbHeight }}>
@@ -1039,11 +1007,11 @@ export default function Home() {
             {viewMode === "memo" ? (
               <button
                 type="button"
-                onClick={saveCurrentSession}
-                disabled={!memo.trim()}
-                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+                onClick={toggleSearch}
+                aria-expanded={isSearchOpen}
+                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
               >
-                저장
+                검색
               </button>
             ) : null}
             {viewMode === "memo" ? (
@@ -1054,12 +1022,23 @@ export default function Home() {
               >
                 리스트
               </button>
+            ) : null}
+            {viewMode === "memo" ? (
+              <button
+                type="button"
+                onClick={saveCurrentSession}
+                disabled={!memo.trim()}
+                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+              >
+                저장
+              </button>
             ) : (
               <button
                 type="button"
                 onClick={startNewMemo}
-                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
+                className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
               >
+                <span aria-hidden="true" className="text-[19px] leading-none">+</span>
                 새 메모
               </button>
             )}
@@ -1067,10 +1046,20 @@ export default function Home() {
         </div>
       </header>
 
-      {viewMode === "memo" ? (
+      <div
+        aria-live="polite"
+        className={`pointer-events-none fixed left-1/2 top-20 z-40 -translate-x-1/2 transition duration-200 ${
+          isSaveToastVisible ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0"
+        }`}
+      >
+        <div className="rounded-full border border-[#E8E8EC] bg-[#0A0A0A] px-4 py-2 font-['DM_Sans'] text-[14px] font-bold text-white shadow-[0_10px_30px_rgba(0,0,0,0.16)]">
+          저장 완료
+        </div>
+      </div>
+
+      {viewMode === "memo" && isSearchOpen ? (
         <div
-          className="sticky z-20 border-b border-[#E8E8EC] bg-white/90 px-3 py-3 backdrop-blur transition-[top] duration-200 md:px-6"
-          style={{ top: isGnbVisible ? gnbHeight : 0 }}
+          className="border-b border-[#E8E8EC] bg-white px-3 py-3 md:px-6"
         >
           <div className="mx-auto flex max-w-7xl items-center gap-3">
             <label className="sr-only" htmlFor="search">
@@ -1096,7 +1085,7 @@ export default function Home() {
           </div>
           <div className="mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 font-['JetBrains_Mono'] text-[12px] text-[#6B6B6B]">
             <span className="rounded-full bg-[#F1F1F4] px-3 py-1">
-              메모 {memoMatches.length}건 · 카드 {searchFilteredSummaries.length}명 · 미입금 {searchUnpaidCount}명
+              메모 {memoMatches.length}건 · 카드 {searchFilteredSummaries.length}명
             </span>
             <div className="flex gap-2">
               <button
@@ -1125,8 +1114,19 @@ export default function Home() {
           {savedSessions.length > 0 ? (
             savedSessions.map((session) => {
               const sessionSummaries = parseMemo(session.memo);
-              const sessionTotal = sessionSummaries.reduce((sum, summary) => sum + summary.total, 0);
-              const sessionQuantity = sessionSummaries.reduce((sum, summary) => sum + summary.quantity, 0);
+              const sessionParticipantIds = new Set(
+                sessionSummaries.map((summary) => canonicalInstagramId(summary.nickname)),
+              );
+              const sessionRound = shippingRounds.find(
+                (round) => round.id === localDateId(new Date(session.createdAt)),
+              );
+              const waitingCount = sessionRound
+                ? sessionRound.participants.filter(
+                    (participant) =>
+                      participant.status === "WAITING" &&
+                      sessionParticipantIds.has(canonicalInstagramId(participant.instagramId)),
+                  ).length
+                : sessionSummaries.length;
 
               return (
                 <div key={session.id} className="relative overflow-hidden rounded-xl bg-[#EF4444]">
@@ -1161,7 +1161,7 @@ export default function Home() {
                           className="w-full rounded-md border border-transparent bg-transparent px-0 font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:bg-white focus:px-3 focus:ring-[3px] focus:ring-[#6366F1]/15"
                         />
                         <p className="mt-2 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                          {sessionSummaries.length}명 · {sessionQuantity}개 · {won(sessionTotal)} · 입금 {session.paidNicknames.length}명
+                          {sessionSummaries.length}명 · 미입금 {waitingCount}명
                         </p>
                         <p className="mt-1 font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
                           저장 {new Date(session.updatedAt).toLocaleString("ko-KR")}
@@ -1196,45 +1196,45 @@ export default function Home() {
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">수량</p>
               <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#0A0A0A] md:text-[32px]">{grandQuantity}개</p>
             </div>
-            <button
-              type="button"
-              onClick={toggleUnpaidFilter}
-              className={`rounded-lg border px-4 py-3 text-left transition md:px-5 ${
-                paymentFilter === "unpaid"
-                  ? "border-[#6366F1] bg-[#F4F4FF] shadow-[0_4px_12px_rgba(99,102,241,0.16)]"
-                  : "border-[#E8E8EC] bg-white hover:-translate-y-px hover:border-[#6366F1]"
-              }`}
-            >
+            <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">미입금</p>
-              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#EF4444] md:text-[32px]">{unpaidCount}명</p>
-            </button>
+              <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#EF4444] md:text-[32px]">{shippingCounts.waiting}명</p>
+            </div>
             <div className="rounded-lg border border-[#E8E8EC] bg-white px-4 py-3 md:px-5">
               <p className="font-['DM_Sans'] text-[12px] font-medium uppercase text-[#6B6B6B]">합계</p>
               <p className="mt-1 font-['General_Sans'] text-2xl font-bold leading-none text-[#6366F1] md:text-[32px]">{won(grandTotal)}</p>
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4">
-            <textarea
-              ref={textareaRef}
-              value={memo}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
-              className="min-h-40 w-full resize-y rounded-lg border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[16px] leading-7 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-48 md:text-[17px]"
-              placeholder="예: 홍길동 - 1.5 + 2.0 + 0.5"
-              spellCheck={false}
-            />
-            <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleGenerateMemoWithTotals}
-                disabled={!memo.trim()}
-                className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
-              >
-                확인
-              </button>
+          <div
+            className={`grid gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4 ${
+              generatedMemo ? "md:grid-cols-2 md:gap-4" : ""
+            }`}
+          >
+            <div className="grid min-w-0 grid-rows-[1fr_auto] gap-3">
+              <textarea
+                ref={textareaRef}
+                value={memo}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
+                className="min-h-40 w-full resize-y rounded-lg border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[16px] leading-7 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-48 md:text-[17px]"
+                placeholder="예: 홍길동 - 1.5 + 2.0 + 0.5"
+                spellCheck={false}
+              />
+              {!generatedMemo ? (
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateMemoWithTotals}
+                    disabled={!memo.trim()}
+                    className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+                  >
+                    확인
+                  </button>
+                </div>
+              ) : null}
             </div>
             {generatedMemo ? (
-              <div className="grid gap-2 border-t border-[#E8E8EC] pt-3">
+              <div className="grid min-w-0 grid-rows-[auto_1fr] gap-2 border-t border-[#E8E8EC] pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">합계 포함 복사용 메모</p>
                   <button
@@ -1248,99 +1248,36 @@ export default function Home() {
                 <textarea
                   value={generatedMemo}
                   readOnly
-                  className="min-h-36 w-full resize-y rounded-lg border border-[#E8E8EC] bg-[#FAFAFA] p-4 font-['JetBrains_Mono'] text-[15px] leading-7 text-[#0A0A0A] outline-none"
+                  className="min-h-40 h-full w-full resize-y rounded-lg border border-[#E8E8EC] bg-[#FAFAFA] p-4 font-['JetBrains_Mono'] text-[15px] leading-7 text-[#0A0A0A] outline-none md:min-h-48"
                 />
               </div>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-4 py-3">
-            <div className="flex items-center gap-3">
-              <input
-                id="select-all-paid"
-                type="checkbox"
-                checked={allFilteredPaid}
-                onChange={toggleAllFilteredPaid}
-                disabled={filteredSummaries.length === 0}
-                className="size-5 rounded border border-[#E8E8EC] accent-[#6366F1] disabled:cursor-not-allowed disabled:opacity-40"
-              />
-              <label htmlFor="select-all-paid" className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                검색 결과 {filteredSummaries.length}명 / 전체 {summaries.length}명
-                {paymentFilter === "unpaid" ? " · 미입금만 보기" : ""}
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="sr-only" htmlFor="sort">
-                정렬
-              </label>
-              <select
-                id="sort"
-                value={sortMode}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => setSortMode(event.target.value as SortMode)}
-                className="h-11 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
-              >
-                <option value="memo">메모 순서</option>
-                <option value="name">가나다순</option>
-                <option value="amountAsc">금액 오름차순</option>
-                <option value="amountDesc">금액 내림차순</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleDownloadCsv}
-                disabled={summaries.length === 0}
-                className="h-11 rounded-md bg-[#6366F1] px-6 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
-              >
-                엑셀 다운로드
-              </button>
-            </div>
-          </div>
-
-          <section ref={resultSectionRef} className="grid scroll-mt-36 gap-4">
-            {filteredSummaries.length > 0 ? (
-              filteredSummaries.map((summary) => (
-                <article key={summary.nickname} className="rounded-xl border border-[#E8E8EC] bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)]">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <input
-                        id={`paid-${encodeURIComponent(summary.nickname)}`}
-                        type="checkbox"
-                        checked={paidNicknames.has(summary.nickname)}
-                        onChange={() => togglePaid(summary.nickname)}
-                        className="mt-1 size-5 rounded border border-[#E8E8EC] accent-[#6366F1]"
-                      />
-                      <div>
-                        <label htmlFor={`paid-${encodeURIComponent(summary.nickname)}`} className="font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">
-                          {summary.nickname}
-                        </label>
-                        <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-                          총 {summary.quantity}개 · {won(summary.total)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-[#F4F4FF] px-3 py-2 text-right">
-                      <p className="font-['DM_Sans'] text-[11px] font-medium uppercase text-[#6B6B6B]">
-                        {paidNicknames.has(summary.nickname) ? "입금완료" : "미입금"}
-                      </p>
-                      <p className="font-['General_Sans'] text-lg font-bold leading-none text-[#6366F1]">{won(summary.total)}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {summary.items.map((item, index) => (
-                      <span
-                        key={`${summary.nickname}-${item.clothingNo}-${index}`}
-                        className="rounded-full bg-[#F1F1F4] px-3 py-1 font-['JetBrains_Mono'] text-[12px] font-medium text-[#6B6B6B]"
-                      >
-                        {itemLabel(item)}
-                      </span>
-                    ))}
-                  </div>
-                </article>
-              ))
-            ) : (
-              <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
-                표시할 결과가 없습니다.
-              </div>
-            )}
+          <section>
+            <ShippingWorkspace
+              dateId={shippingDateId}
+              summaries={shippingSummaries}
+              tab={shippingTab}
+              onTabChange={setShippingTab}
+              onCountsChange={handleShippingCountsChange}
+              sortControl={(
+                <>
+                  <label className="sr-only" htmlFor="sort">정렬</label>
+                  <select
+                    id="sort"
+                    value={sortMode}
+                    onChange={(event: ChangeEvent<HTMLSelectElement>) => setSortMode(event.target.value as SortMode)}
+                    className="h-11 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] outline-none transition focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15"
+                  >
+                    <option value="memo">메모 순서</option>
+                    <option value="name">가나다순</option>
+                    <option value="amountAsc">금액 오름차순</option>
+                    <option value="amountDesc">금액 내림차순</option>
+                  </select>
+                </>
+              )}
+            />
           </section>
         </section>
       )}
