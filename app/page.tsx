@@ -12,6 +12,36 @@ import {
   ShippingRound,
 } from "./shipping/shipping-data";
 
+function HeaderIcon({ type }: { type: "search" | "list" | "save" }) {
+  if (type === "search") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4.5-4.5" />
+      </svg>
+    );
+  }
+
+  if (type === "list") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 6h13" />
+        <path d="M8 12h13" />
+        <path d="M8 18h13" />
+        <path d="M3 6h.01" />
+        <path d="M3 12h.01" />
+        <path d="M3 18h.01" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 type PurchaseItem = {
   clothingNo?: string;
   rawPrice: string;
@@ -1009,18 +1039,22 @@ export default function Home() {
                 type="button"
                 onClick={toggleSearch}
                 aria-expanded={isSearchOpen}
-                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+                aria-label="검색"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] md:px-4"
               >
-                검색
+                <HeaderIcon type="search" />
+                <span className="hidden md:inline">검색</span>
               </button>
             ) : null}
             {viewMode === "memo" ? (
               <button
                 type="button"
                 onClick={() => navigateToView("list")}
-                className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+                aria-label="리스트"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1] md:px-4"
               >
-                리스트
+                <HeaderIcon type="list" />
+                <span className="hidden md:inline">리스트</span>
               </button>
             ) : null}
             {viewMode === "memo" ? (
@@ -1028,9 +1062,11 @@ export default function Home() {
                 type="button"
                 onClick={saveCurrentSession}
                 disabled={!memo.trim()}
-                className="h-10 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none"
+                aria-label="저장"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md bg-[#6366F1] px-3 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] hover:shadow-[0_4px_12px_rgba(99,102,241,0.35)] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C] disabled:shadow-none md:px-4"
               >
-                저장
+                <HeaderIcon type="save" />
+                <span className="hidden md:inline">저장</span>
               </button>
             ) : (
               <button
