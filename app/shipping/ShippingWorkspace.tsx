@@ -41,7 +41,7 @@ type Props = {
 const fieldLabels: Array<{ key: keyof ShippingInfo; label: string; placeholder: string }> = [
   { key: "name", label: "성명", placeholder: "성함" },
   { key: "address", label: "주소", placeholder: "주소" },
-  { key: "zipCode", label: "우편번호", placeholder: "5자리 우편번호" },
+  { key: "zipCode", label: "우편번호", placeholder: "선택 입력" },
   { key: "phone1", label: "전화번호", placeholder: "010-0000-0000" },
   { key: "phone2", label: "기타 연락처", placeholder: "선택 입력" },
   { key: "memo", label: "배송메세지", placeholder: "선택 입력" },
@@ -247,15 +247,7 @@ export default function ShippingWorkspace({
 
         if (!response.ok) {
           setDraftInfo(nextInfo);
-          setShowReview(true);
-          setNotice({
-            tone: "error",
-            message:
-              result.code === "NOT_CONFIGURED"
-                ? "우편번호 자동 조회 설정이 필요합니다. 우편번호를 직접 입력하거나 API 승인키를 설정해주세요."
-                : result.error || "우편번호를 자동으로 찾지 못했습니다. 직접 확인해주세요.",
-          });
-          return;
+          setNotice({ tone: "info", message: "우편번호 없이 주문서를 저장합니다." });
         }
 
         const candidates = result.candidates ?? [];
@@ -263,24 +255,21 @@ export default function ShippingWorkspace({
 
         if (uniqueZipCodes.length === 1) {
           nextInfo = { ...nextInfo, zipCode: uniqueZipCodes[0] };
-        } else {
+        } else if (candidates.length > 0) {
           setDraftInfo(nextInfo);
           setPostcodeCandidates(candidates);
           setShowReview(true);
           setNotice({
             tone: "info",
-            message:
-              candidates.length > 0
-                ? "주소 검색 결과가 여러 개입니다. 알맞은 우편번호를 선택해주세요."
-                : "주소에서 우편번호를 찾지 못했습니다. 주소를 확인하고 직접 입력해주세요.",
+            message: "주소 검색 결과가 여러 개입니다. 알맞은 우편번호를 선택하거나 그대로 저장해주세요.",
           });
           return;
+        } else {
+          setNotice({ tone: "info", message: "우편번호 없이 주문서를 저장합니다." });
         }
       } catch {
         setDraftInfo(nextInfo);
-        setShowReview(true);
-        setNotice({ tone: "error", message: "우편번호 조회 중 오류가 발생했습니다. 직접 확인해주세요." });
-        return;
+        setNotice({ tone: "info", message: "우편번호 없이 주문서를 저장합니다." });
       } finally {
         setIsLookingUpPostcode(false);
       }
@@ -303,7 +292,7 @@ export default function ShippingWorkspace({
       return;
     }
     if (!isReadyShippingInfo(draftInfo)) {
-      setNotice({ tone: "error", message: "성명, 주소, 5자리 우편번호, 전화번호, 품목명은 필수입니다." });
+      setNotice({ tone: "error", message: "성명, 주소, 전화번호, 품목명은 필수입니다." });
       return;
     }
     mapShippingInfo(selectedInstagramId, draftInfo);

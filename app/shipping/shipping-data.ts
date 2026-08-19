@@ -272,7 +272,6 @@ export function isReadyShippingInfo(info: ShippingInfo) {
   return Boolean(
     info.name.trim() &&
       info.address.trim() &&
-      /^\d{5}$/.test(info.zipCode.trim()) &&
       info.phone1.trim() &&
       info.items.trim(),
   );
