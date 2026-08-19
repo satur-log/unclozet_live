@@ -179,6 +179,16 @@ function findParticipantId(text: string, lines: string[], participantIds: string
   const labeledId = valueForLabels(lines, ["인스타그램(?:\\s*아이디)?", "인스타(?:\\s*아이디)?", "instagram(?:\\s*id)?", "아이디", "id"]);
   const candidates = [labeledId, lines[0] ?? "", ...lines];
 
+  if (participantIds.length === 0) {
+    for (const candidate of candidates) {
+      const cleanedCandidate = cleanValue(candidate).split(/\s+/)[0];
+
+      if (/^@?[a-z0-9._]{2,30}$/i.test(cleanedCandidate)) {
+        return cleanedCandidate;
+      }
+    }
+  }
+
   for (const candidate of candidates) {
     const cleanedCandidate = cleanValue(candidate).split(/\s+/)[0];
     const canonicalCandidate = canonicalInstagramId(cleanedCandidate);
@@ -207,7 +217,7 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
   const instagramId = findParticipantId(text, lines, participantIds);
   const phoneMatches = text.match(/(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/g) ?? [];
   const zipMatch = text.match(/(?:우편번호\s*[:：=\-–—]?\s*)?(\d{5})(?!\d)/);
-  const parsedName = valueForLabels(lines, [
+  let parsedName = valueForLabels(lines, [
     "받으실\\s*분(?:의)?\\s*성함",
     "받는\\s*분(?:\\s*성명)?",
     "받는분(?:\\s*성명)?",
@@ -215,7 +225,7 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
     "성함",
     "이름",
   ]);
-  const parsedAddress = valueForLabels(lines, [
+  let parsedAddress = valueForLabels(lines, [
     "받으실\\s*분(?:의)?\\s*주소",
     "받는\\s*분\\s*주소",
     "받는분\\s*주소",
@@ -225,6 +235,24 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
   const parsedPhone1 = valueForLabels(lines, ["전화번호", "연락처", "휴대폰", "핸드폰"]);
   const parsedPhone2 = valueForLabels(lines, ["기타\\s*연락처", "비상\\s*연락처"]);
   const parsedZipCode = valueForLabels(lines, ["우편번호"]) || zipMatch?.[1] || "";
+
+  if ((!parsedName || !parsedAddress) && instagramId) {
+    const idLineIndex = lines.findIndex((line) => {
+      const firstToken = cleanValue(line).split(/\s+/)[0];
+      return canonicalInstagramId(firstToken) === canonicalInstagramId(instagramId);
+    });
+    const detailLines = idLineIndex >= 0 ? lines.slice(idLineIndex + 1) : lines;
+    const phoneLineIndex = detailLines.findIndex((line) => /(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/.test(line));
+
+    if (!parsedName && detailLines[0] && !/(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/.test(detailLines[0])) {
+      parsedName = cleanValue(detailLines[0]);
+    }
+
+    if (!parsedAddress) {
+      const addressLines = detailLines.slice(1, phoneLineIndex >= 0 ? phoneLineIndex : undefined);
+      parsedAddress = addressLines.map(cleanValue).filter(Boolean).join(" ");
+    }
+  }
 
   return {
     instagramId,

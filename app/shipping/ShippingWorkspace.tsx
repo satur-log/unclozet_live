@@ -34,7 +34,8 @@ type Props = {
   tab: ShippingTab;
   onTabChange: (tab: ShippingTab) => void;
   onCountsChange: (counts: ShippingCounts) => void;
-  sortControl: React.ReactNode;
+  sortControl?: React.ReactNode;
+  standalone?: boolean;
 };
 
 const fieldLabels: Array<{ key: keyof ShippingInfo; label: string; placeholder: string }> = [
@@ -93,6 +94,7 @@ export default function ShippingWorkspace({
   onTabChange,
   onCountsChange,
   sortControl,
+  standalone = false,
 }: Props) {
   const [round, setRound] = useState<ShippingRound | null>(null);
   const [rawText, setRawText] = useState("");
@@ -106,18 +108,34 @@ export default function ShippingWorkspace({
   const participantKey = summaries.map((summary) => canonicalInstagramId(summary.instagramId)).join("|");
 
   useEffect(() => {
-    if (summaries.length === 0) {
+    if (!standalone && summaries.length === 0) {
       setRound(null);
       return;
     }
 
     setRound(seedShippingRound(dateId, summaries.map((summary) => summary.instagramId)));
-  }, [dateId, participantKey]);
+  }, [dateId, participantKey, standalone]);
 
-  const summaryById = useMemo(
-    () => new Map(summaries.map((summary) => [canonicalInstagramId(summary.instagramId), summary])),
-    [summaries],
-  );
+  const summaryById = useMemo(() => {
+    const nextSummaryById = new Map(summaries.map((summary) => [canonicalInstagramId(summary.instagramId), summary]));
+
+    if (standalone) {
+      (round?.participants ?? []).forEach((participant) => {
+        const canonicalId = canonicalInstagramId(participant.instagramId);
+
+        if (!nextSummaryById.has(canonicalId)) {
+          nextSummaryById.set(canonicalId, {
+            instagramId: participant.instagramId,
+            quantity: 1,
+            totalLabel: "주문서만",
+            items: participant.shippingInfo ? [participant.shippingInfo.items || participant.instagramId] : [],
+          });
+        }
+      });
+    }
+
+    return nextSummaryById;
+  }, [round, standalone, summaries]);
   const counts = useMemo<ShippingCounts>(() => {
     const currentParticipants = (round?.participants ?? []).filter((participant) =>
       summaryById.has(canonicalInstagramId(participant.instagramId)),
@@ -150,16 +168,20 @@ export default function ShippingWorkspace({
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const mapShippingInfo = (instagramId: string, shippingInfo: ShippingInfo) => {
-    if (!round) return;
+  const mapShippingInfo = (instagramId: string, shippingInfo: ShippingInfo, baseRound = round) => {
+    if (!baseRound) return;
 
     persistRound({
-      ...round,
-      participants: round.participants.map((participant) =>
-        canonicalInstagramId(participant.instagramId) === canonicalInstagramId(instagramId)
-          ? { ...participant, shippingInfo, status: "READY" as const }
-          : participant,
-      ),
+      ...baseRound,
+      participants: baseRound.participants.some(
+        (participant) => canonicalInstagramId(participant.instagramId) === canonicalInstagramId(instagramId),
+      )
+        ? baseRound.participants.map((participant) =>
+            canonicalInstagramId(participant.instagramId) === canonicalInstagramId(instagramId)
+              ? { ...participant, shippingInfo, status: "READY" as const }
+              : participant,
+          )
+        : [...baseRound.participants, { instagramId, shippingInfo, status: "READY" as const }],
     });
     onTabChange("ready");
     setNotice({ tone: "success", message: `${instagramId} 주문서를 출력 대기로 등록했습니다.` });
@@ -172,12 +194,22 @@ export default function ShippingWorkspace({
 
     setPostcodeCandidates([]);
 
-    const participantIds = round.participants.map((participant) => participant.instagramId);
+    let workingRound = round;
+    const participantIds = workingRound.participants.map((participant) => participant.instagramId);
     const parsed = parseKakaoOrder(sourceText, participantIds);
-    const requestedId = forcedInstagramId || parsed.instagramId;
-    const participant = round.participants.find(
+    const requestedId = forcedInstagramId || parsed.instagramId || detectedInstagramId(sourceText);
+    let participant = workingRound.participants.find(
       (candidate) => canonicalInstagramId(candidate.instagramId) === canonicalInstagramId(requestedId),
     );
+
+    if (!participant && standalone && requestedId) {
+      participant = { instagramId: requestedId.replace(/^@/, ""), status: "WAITING", shippingInfo: null };
+      workingRound = saveShippingRound({
+        ...workingRound,
+        participants: [...workingRound.participants, participant],
+      });
+      setRound(workingRound);
+    }
 
     if (!participant) {
       const detectedId = detectedInstagramId(sourceText);
@@ -257,7 +289,7 @@ export default function ShippingWorkspace({
     setDraftInfo(nextInfo);
 
     if (isReadyShippingInfo(nextInfo)) {
-      mapShippingInfo(participant.instagramId, nextInfo);
+      mapShippingInfo(participant.instagramId, nextInfo, workingRound);
       return;
     }
 
@@ -422,7 +454,7 @@ export default function ShippingWorkspace({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E8E8EC] bg-white px-3 py-3 md:px-4">
         <div className="flex min-w-0 overflow-x-auto" role="tablist" aria-label="배송 상태">
           {([
-            ["waiting", "미입금", counts.waiting],
+            ["waiting", standalone ? "정보 확인 필요" : "미입금", counts.waiting],
             ["ready", "주문서 출력 대기", counts.ready],
             ["completed", "완료", counts.completed],
           ] as const).map(([value, label, count]) => (
@@ -448,7 +480,7 @@ export default function ShippingWorkspace({
             disabled={counts.ready === 0}
             className="h-11 rounded-md bg-[#6366F1] px-4 text-[13px] font-bold text-white transition hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#E4E4E7] disabled:text-[#A1A1AA]"
           >
-            출력 대기 엑셀 다운로드 ({counts.ready}건)
+            {standalone ? "주문서 엑셀 다운로드" : "출력 대기 엑셀 다운로드"} ({counts.ready}건)
           </button>
         </div>
       </div>
@@ -464,9 +496,13 @@ export default function ShippingWorkspace({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="break-all font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A]">{summary.instagramId}</h2>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${statusBadgeStyles(participant.status)}`}>{statusLabel(participant.status)}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${statusBadgeStyles(participant.status)}`}>
+                        {standalone && participant.status === "WAITING" ? "정보 확인 필요" : statusLabel(participant.status)}
+                      </span>
                     </div>
-                    <p className="mt-1 text-[13px] font-medium text-[#6B6B6B]">총 {summary.quantity}개 · {summary.totalLabel}</p>
+                    <p className="mt-1 text-[13px] font-medium text-[#6B6B6B]">
+                      {standalone ? "메모 없이 등록된 주문서" : `총 ${summary.quantity}개 · ${summary.totalLabel}`}
+                    </p>
                     {participant.shippingInfo ? (
                       <p className="mt-3 break-words text-[13px] leading-5 text-[#52525B]">
                         {participant.shippingInfo.name} · {participant.shippingInfo.phone1}<br />
@@ -494,7 +530,9 @@ export default function ShippingWorkspace({
               </article>
             );
           }) : (
-            <div className="rounded-xl border border-dashed border-[#D4D4D8] bg-white p-8 text-center text-[14px] text-[#A1A1AA]">이 상태의 참여자가 없습니다.</div>
+            <div className="rounded-xl border border-dashed border-[#D4D4D8] bg-white p-8 text-center text-[14px] text-[#A1A1AA]">
+              {standalone ? "이 상태의 주문서가 없습니다." : "이 상태의 참여자가 없습니다."}
+            </div>
           )}
         </div>
 

@@ -63,7 +63,7 @@ type PriceEntry = {
 };
 
 type SortMode = "memo" | "name" | "amountAsc" | "amountDesc";
-type ViewMode = "memo" | "list";
+type ViewMode = "memo" | "list" | "orders";
 type AppHistoryState = {
   unclozetView?: ViewMode;
   activeSessionId?: string | null;
@@ -95,6 +95,7 @@ const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const EMPTY_SHIPPING_SUMMARIES: ShippingSummary[] = [];
 
 function normalizePrice(value: string) {
   const compact = value.replace(/,/g, "");
@@ -261,12 +262,20 @@ function routePath(viewMode: ViewMode, activeSessionId: string | null) {
     return "/list";
   }
 
+  if (viewMode === "orders") {
+    return "/orders";
+  }
+
   return activeSessionId ? `/memo/${encodeURIComponent(activeSessionId)}` : "/";
 }
 
 function parseRoutePath(pathname: string): AppRouteState {
   if (pathname === "/list") {
     return { viewMode: "list", activeSessionId: null };
+  }
+
+  if (pathname === "/orders") {
+    return { viewMode: "orders", activeSessionId: null };
   }
 
   const memoMatch = pathname.match(/^\/memo\/([^/]+)$/);
@@ -622,8 +631,8 @@ export default function Home() {
     setShippingRounds(readShippingRounds());
     window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(sortSavedSessions(localSessions)));
 
-    if (initialRoute.viewMode === "list") {
-      setViewMode("list");
+    if (initialRoute.viewMode === "list" || initialRoute.viewMode === "orders") {
+      setViewMode(initialRoute.viewMode);
     }
 
     if (!routeSession && savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
@@ -741,7 +750,7 @@ export default function Home() {
     const handlePopState = (event: PopStateEvent) => {
       const state = event.state as AppHistoryState | null;
 
-      if (state?.unclozetView === "list" || state?.unclozetView === "memo") {
+      if (state?.unclozetView === "list" || state?.unclozetView === "memo" || state?.unclozetView === "orders") {
         const session = state.activeSessionId
           ? savedSessionsRef.current.find((savedSession) => savedSession.id === state.activeSessionId)
           : undefined;
@@ -1023,15 +1032,17 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="truncate font-['General_Sans'] text-[24px] font-bold leading-tight text-[#0A0A0A] md:text-[32px]">
-              {viewMode === "list" ? "저장 리스트" : pageTitle}
+              {viewMode === "list" ? "저장 리스트" : viewMode === "orders" ? "주문서 작업" : pageTitle}
             </h1>
-            <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
-              {viewMode === "list"
-                ? `최근 7일 기준 · ${hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}`
-                : activeSession
-                  ? "자동 저장 중"
-                  : "저장 전 임시 저장 중"}
-            </p>
+            {viewMode !== "orders" ? (
+              <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                {viewMode === "list"
+                  ? `최근 7일 기준 · ${hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}`
+                  : activeSession
+                    ? "자동 저장 중"
+                    : "저장 전 임시 저장 중"}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {viewMode === "memo" ? (
@@ -1046,7 +1057,7 @@ export default function Home() {
                 <span className="hidden md:inline">검색</span>
               </button>
             ) : null}
-            {viewMode === "memo" ? (
+            {viewMode === "memo" || viewMode === "orders" ? (
               <button
                 type="button"
                 onClick={() => navigateToView("list")}
@@ -1068,16 +1079,25 @@ export default function Home() {
                 <HeaderIcon type="save" />
                 <span className="hidden md:inline">저장</span>
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={startNewMemo}
-                className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
-              >
-                <span aria-hidden="true" className="text-[19px] leading-none">+</span>
-                새 메모
-              </button>
-            )}
+            ) : viewMode === "list" ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigateToView("orders", null)}
+                  className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+                >
+                  주문서 작업
+                </button>
+                <button
+                  type="button"
+                  onClick={startNewMemo}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#6366F1] px-4 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5]"
+                >
+                  <span aria-hidden="true" className="text-[19px] leading-none">+</span>
+                  새 메모
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </header>
@@ -1220,6 +1240,17 @@ export default function Home() {
               저장된 리스트가 없습니다.
             </div>
           )}
+        </section>
+      ) : viewMode === "orders" ? (
+        <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
+          <ShippingWorkspace
+            dateId={`standalone-orders-${localDateId()}`}
+            summaries={EMPTY_SHIPPING_SUMMARIES}
+            tab={shippingTab}
+            onTabChange={setShippingTab}
+            onCountsChange={handleShippingCountsChange}
+            standalone
+          />
         </section>
       ) : (
         <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
