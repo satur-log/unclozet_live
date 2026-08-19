@@ -263,7 +263,7 @@ function routePath(viewMode: ViewMode, activeSessionId: string | null) {
   }
 
   if (viewMode === "orders") {
-    return "/orders";
+    return activeSessionId ? `/orders/${encodeURIComponent(activeSessionId)}` : "/orders";
   }
 
   return activeSessionId ? `/memo/${encodeURIComponent(activeSessionId)}` : "/";
@@ -276,6 +276,12 @@ function parseRoutePath(pathname: string): AppRouteState {
 
   if (pathname === "/orders") {
     return { viewMode: "orders", activeSessionId: null };
+  }
+
+  const orderMatch = pathname.match(/^\/orders\/([^/]+)$/);
+
+  if (orderMatch) {
+    return { viewMode: "orders", activeSessionId: decodeURIComponent(orderMatch[1]) };
   }
 
   const memoMatch = pathname.match(/^\/memo\/([^/]+)$/);
@@ -487,6 +493,13 @@ export default function Home() {
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
   const shippingDateId = localDateId(activeSession ? new Date(activeSession.createdAt) : new Date());
+  const standaloneOrderRounds = useMemo(
+    () =>
+      shippingRounds
+        .filter((round) => round.id.startsWith("standalone-orders-") && round.participants.length > 0)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [shippingRounds],
+  );
   const shippingSummaries = useMemo<ShippingSummary[]>(
     () => searchFilteredSummaries.map((summary) => ({
       instagramId: summary.nickname,
@@ -635,7 +648,11 @@ export default function Home() {
       setViewMode(initialRoute.viewMode);
     }
 
-    if (!routeSession && savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
+    if (initialRoute.viewMode === "orders" && initialRoute.activeSessionId) {
+      setActiveSessionId(initialRoute.activeSessionId);
+    }
+
+    if (initialRoute.viewMode !== "orders" && !routeSession && savedActiveSessionId && localSessions.some((session) => session.id === savedActiveSessionId)) {
       setActiveSessionId(savedActiveSessionId);
     }
 
@@ -992,6 +1009,23 @@ export default function Home() {
     requestAnimationFrame(focusTextareaEnd);
   };
 
+  const startNewOrder = () => {
+    const orderId = `standalone-orders-${crypto.randomUUID()}`;
+    setActiveSessionId(orderId);
+    setShippingTab("waiting");
+    setQuery("");
+    setIsSearchOpen(false);
+    navigateToView("orders", orderId);
+  };
+
+  const loadOrderRound = (round: ShippingRound) => {
+    setActiveSessionId(round.id);
+    setShippingTab("ready");
+    setQuery("");
+    setIsSearchOpen(false);
+    navigateToView("orders", round.id);
+  };
+
   const handleGenerateMemoWithTotals = () => {
     setGeneratedMemo(memoWithLineTotals(memo));
   };
@@ -1083,7 +1117,7 @@ export default function Home() {
               <>
                 <button
                   type="button"
-                  onClick={() => navigateToView("orders", null)}
+                  onClick={startNewOrder}
                   className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
                 >
                   주문서 작업
@@ -1167,6 +1201,12 @@ export default function Home() {
 
       {viewMode === "list" ? (
         <section className="mx-auto grid max-w-7xl gap-4 px-3 pt-5 md:px-6 md:pt-8">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-['General_Sans'] text-[18px] font-bold text-[#0A0A0A]">메모</h2>
+            <span className="rounded-full bg-[#F1F1F4] px-3 py-1 font-['DM_Sans'] text-[12px] font-bold text-[#71717A]">
+              {savedSessions.length}건
+            </span>
+          </div>
           {savedSessions.length > 0 ? (
             savedSessions.map((session) => {
               const sessionSummaries = parseMemo(session.memo);
@@ -1237,14 +1277,60 @@ export default function Home() {
             })
           ) : (
             <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
-              저장된 리스트가 없습니다.
+              저장된 메모가 없습니다.
+            </div>
+          )}
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <h2 className="font-['General_Sans'] text-[18px] font-bold text-[#0A0A0A]">주문서</h2>
+            <span className="rounded-full bg-[#EEF2FF] px-3 py-1 font-['DM_Sans'] text-[12px] font-bold text-[#4F46E5]">
+              {standaloneOrderRounds.length}건
+            </span>
+          </div>
+          {standaloneOrderRounds.length > 0 ? (
+            standaloneOrderRounds.map((round) => {
+              const readyCount = round.participants.filter((participant) => participant.status === "READY").length;
+              const waitingCount = round.participants.filter((participant) => participant.status === "WAITING").length;
+              const completedCount = round.participants.filter((participant) => participant.status === "COMPLETED").length;
+
+              return (
+                <article key={round.id} className="rounded-xl border border-[#E8E8EC] bg-white p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A]">
+                          주문서 작업 {new Date(round.createdAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </h3>
+                        <span className="rounded-full bg-[#EEF2FF] px-2.5 py-1 font-['DM_Sans'] text-[11px] font-bold text-[#4F46E5]">주문서</span>
+                      </div>
+                      <p className="mt-2 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
+                        총 {round.participants.length}건 · 출력 대기 {readyCount}건 · 확인 필요 {waitingCount}건 · 완료 {completedCount}건
+                      </p>
+                      <p className="mt-1 font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
+                        저장 {new Date(round.updatedAt).toLocaleString("ko-KR")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => loadOrderRound(round)}
+                      className="h-11 rounded-md bg-[#111827] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-black"
+                    >
+                      열기
+                    </button>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
+              저장된 주문서가 없습니다.
             </div>
           )}
         </section>
       ) : viewMode === "orders" ? (
         <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
           <ShippingWorkspace
-            dateId={`standalone-orders-${localDateId()}`}
+            dateId={activeSessionId?.startsWith("standalone-orders-") ? activeSessionId : `standalone-orders-${localDateId()}`}
             summaries={EMPTY_SHIPPING_SUMMARIES}
             tab={shippingTab}
             onTabChange={setShippingTab}
