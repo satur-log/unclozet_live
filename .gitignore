@@ -6,6 +6,7 @@ out
 !.env.example
 work
 outputs
+.playwright-cli
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

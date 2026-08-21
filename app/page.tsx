@@ -91,7 +91,14 @@ const MEMO_STORAGE_KEY = "unclozet-live-memo";
 const PAID_STORAGE_KEY = "unclozet-live-paid-nicknames";
 const SAVED_SESSIONS_STORAGE_KEY = "unclozet-live-saved-sessions";
 const ACTIVE_SESSION_STORAGE_KEY = "unclozet-live-active-session-id";
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const SHIPPING_ROUNDS_STORAGE_KEY = "unclozet-shipping-rounds-v1";
+const LOCAL_DATA_STORAGE_KEYS = [
+  MEMO_STORAGE_KEY,
+  PAID_STORAGE_KEY,
+  SAVED_SESSIONS_STORAGE_KEY,
+  ACTIVE_SESSION_STORAGE_KEY,
+  SHIPPING_ROUNDS_STORAGE_KEY,
+];
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -248,11 +255,6 @@ function localDateId(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function pruneOldSessions(sessions: SavedSession[]) {
-  const threshold = Date.now() - ONE_WEEK_MS;
-  return sessions.filter((session) => new Date(session.updatedAt).getTime() >= threshold);
-}
-
 function sortSavedSessions(sessions: SavedSession[]) {
   return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
@@ -307,18 +309,16 @@ function readLocalSessions() {
       return [];
     }
 
-    return pruneOldSessions(
-      parsed.filter((session): session is SavedSession => {
-        return (
-          typeof session?.id === "string" &&
-          typeof session?.title === "string" &&
-          typeof session?.memo === "string" &&
-          Array.isArray(session?.paidNicknames) &&
-          typeof session?.createdAt === "string" &&
-          typeof session?.updatedAt === "string"
-        );
-      }),
-    );
+    return parsed.filter((session): session is SavedSession => {
+      return (
+        typeof session?.id === "string" &&
+        typeof session?.title === "string" &&
+        typeof session?.memo === "string" &&
+        Array.isArray(session?.paidNicknames) &&
+        typeof session?.createdAt === "string" &&
+        typeof session?.updatedAt === "string"
+      );
+    });
   } catch {
     return [];
   }
@@ -329,9 +329,8 @@ async function fetchRemoteSessions() {
     return [];
   }
 
-  const since = new Date(Date.now() - ONE_WEEK_MS).toISOString();
   const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/live_memos?updated_at=gte.${encodeURIComponent(since)}&order=updated_at.desc`,
+    `${SUPABASE_URL}/rest/v1/live_memos?order=updated_at.desc`,
     {
       headers: {
         apikey: SUPABASE_ANON_KEY ?? "",
@@ -363,22 +362,6 @@ async function fetchRemoteSessions() {
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     };
-  });
-}
-
-async function deleteRemoteOldSessions() {
-  if (!hasSupabase) {
-    return;
-  }
-
-  const since = new Date(Date.now() - ONE_WEEK_MS).toISOString();
-
-  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?updated_at=lt.${encodeURIComponent(since)}`, {
-    method: "DELETE",
-    headers: {
-      apikey: SUPABASE_ANON_KEY ?? "",
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    },
   });
 }
 
@@ -492,7 +475,7 @@ export default function Home() {
   const grandTotal = summaries.reduce((sum, summary) => sum + summary.total, 0);
   const activeSession = savedSessions.find((session) => session.id === activeSessionId);
   const pageTitle = activeSession?.title ?? draftTitle;
-  const shippingDateId = localDateId(activeSession ? new Date(activeSession.createdAt) : new Date());
+  const shippingDateId = activeSessionId ? `memo-${activeSessionId}` : `draft-${localDateId(new Date())}`;
   const standaloneOrderRounds = useMemo(
     () =>
       shippingRounds
@@ -608,6 +591,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+
+    const shouldClearLocalData = searchParams.get("clearLocalData") === "1";
+
+    if (shouldClearLocalData) {
+      LOCAL_DATA_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
+      window.history.replaceState(window.history.state, "", "/");
+    }
+
     const savedMemo = window.localStorage.getItem(MEMO_STORAGE_KEY);
     const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
     const savedActiveSessionId = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
@@ -658,7 +650,9 @@ export default function Home() {
 
     setHasLoadedStorage(true);
 
-    deleteRemoteOldSessions().catch(() => undefined);
+    if (shouldClearLocalData) {
+      return;
+    }
 
     fetchRemoteSessions()
       .then((remoteSessions) => {
@@ -688,7 +682,7 @@ export default function Home() {
             }
           });
 
-          return sortSavedSessions(pruneOldSessions(Array.from(merged.values())));
+          return sortSavedSessions(Array.from(merged.values()));
         });
       })
       .catch(() => undefined);
@@ -1071,7 +1065,7 @@ export default function Home() {
             {viewMode !== "orders" ? (
               <p className="mt-1 font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">
                 {viewMode === "list"
-                  ? `최근 7일 기준 · ${hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}`
+                  ? `${hasSupabase ? "Supabase 연결됨" : "이 브라우저에 저장 중"}`
                   : activeSession
                     ? "자동 저장 중"
                     : "저장 전 임시 저장 중"}

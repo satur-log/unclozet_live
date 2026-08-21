@@ -148,6 +148,143 @@ function cleanValue(value: string) {
   return value.replace(/^[\s:：=\-–—•·*]+/, "").trim();
 }
 
+function removeLooseSpaces(value: string) {
+  return value.replace(/\s+/g, "");
+}
+
+function compactKoreanAddress(value: string) {
+  const normalized = value
+    .replace(/\s*([,()])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = normalized.split(" ").filter(Boolean);
+  const singleCharacterTokens = tokens.filter((token) => /^[가-힣0-9]$/.test(token)).length;
+  const looksArtificiallySpaced = tokens.length >= 8 && singleCharacterTokens / tokens.length > 0.65;
+
+  if (!looksArtificiallySpaced) {
+    return normalized;
+  }
+
+  return normalized
+    .replace(/\s+/g, "")
+    .replace(/(특별자치도|특별시|광역시|자치도|경기도|강원도|충청북도|충청남도|전라북도|전라남도|경상북도|경상남도|제주도|서울시|부산시|대구시|인천시|광주시|대전시|울산시|세종시|[가-힣]+시|[가-힣]+군|[가-힣]+구|[가-힣]+읍|[가-힣]+면|[가-힣]+동|[가-힣]+로|[가-힣]+길)/g, "$1 ")
+    .replace(/(\d+)(동|호)/g, "$1$2 ")
+    .replace(/\s*([,()])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripFieldNoise(value: string) {
+  return cleanValue(value)
+    .replace(/(?:인스타그램?\s*아이디|인스타|instagram\s*id|아이디|id|성함|이름|주소|전화번호|연락처|휴대폰|핸드폰)\s*[:：=]*/gi, " ")
+    .trim();
+}
+
+function phoneCandidate(value: string) {
+  const mobileMatch = value.match(/(?:\+?\s*8\s*2[\s.-]*)?(?:0[\s.-]*)?1[\s.-]*0(?:[\s.-]*\d){8}/);
+
+  if (mobileMatch) {
+    return mobileMatch[0];
+  }
+
+  const looseNumberMatch = value.match(/(?:^|[^\d])((?:\d[\s.-]*){8,11})(?=$|[^\d])/);
+  return looseNumberMatch?.[1] ?? "";
+}
+
+function firstInstagramId(value: string) {
+  return stripFieldNoise(value).match(/@?[a-z][a-z0-9._]{1,29}/i)?.[0] ?? "";
+}
+
+function firstKoreanName(value: string) {
+  const candidates = Array.from(stripFieldNoise(value).matchAll(/(?:^|[^가-힣])((?:[가-힣]\s*){2,6})(?=$|[^가-힣])/g))
+    .map((match) => removeLooseSpaces(match[1]))
+    .filter((candidate) => /^[가-힣]{2,6}$/.test(candidate));
+
+  return candidates.find((candidate) => !/(?:특별|광역|자치|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|시|도|구|군|동|읍|면|로|길|리)$/.test(candidate)) ?? "";
+}
+
+function addressStartIndex(value: string) {
+  const compact = removeLooseSpaces(value);
+  const markers = [
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+    "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+  ];
+  const compactIndex = markers
+    .map((marker) => compact.indexOf(marker))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+
+  if (compactIndex === undefined) {
+    return -1;
+  }
+
+  let compactCursor = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (/\s/.test(value[index])) {
+      continue;
+    }
+
+    if (compactCursor === compactIndex) {
+      return index;
+    }
+
+    compactCursor += 1;
+  }
+
+  return -1;
+}
+
+function firstAddress(value: string) {
+  const withoutPhone = value.replace(phoneCandidate(value), " ");
+  const withoutId = withoutPhone.replace(firstInstagramId(withoutPhone), " ");
+  const start = addressStartIndex(withoutId);
+
+  if (start < 0) {
+    return "";
+  }
+
+  return compactKoreanAddress(cleanValue(withoutId.slice(start)));
+}
+
+export function normalizePhoneNumber(value: string) {
+  let digits = value.replace(/\D/g, "");
+
+  if (digits.startsWith("82")) {
+    digits = `0${digits.slice(2)}`;
+  }
+
+  if (digits.startsWith("10") && digits.length === 10) {
+    digits = `0${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("010")) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+
+  if (digits.length >= 8) {
+    const tail = digits.slice(-8);
+    return `010-${tail.slice(0, 4)}-${tail.slice(4)}`;
+  }
+
+  return value.trim();
+}
+
+function looksLikeInstagramId(value: string) {
+  return Boolean(firstInstagramId(value));
+}
+
+function looksLikeKoreanName(value: string) {
+  return Boolean(firstKoreanName(value));
+}
+
+function looksLikePhone(value: string) {
+  return Boolean(phoneCandidate(value));
+}
+
+function looksLikeAddress(value: string) {
+  return Boolean(firstAddress(value));
+}
+
 function valueForLabels(lines: string[], labels: string[]) {
   const pattern = new RegExp(
     `^(?:[-–—•·*]|\\d+[.)])?\\s*(?:${labels.join("|")})\\s*[:：=\\-–—]?\\s*(.*)$`,
@@ -215,8 +352,12 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
     .map((line) => line.trim())
     .filter(Boolean);
   const instagramId = findParticipantId(text, lines, participantIds);
-  const phoneMatches = text.match(/(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/g) ?? [];
-  const zipMatch = text.match(/(?:우편번호\s*[:：=\-–—]?\s*)?(\d{5})(?!\d)/);
+  const fullText = lines.join(" / ");
+  const segments = text
+    .split(/\r?\n|\s+\/\s+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const phoneMatches = [...segments, fullText].map(phoneCandidate).filter(Boolean);
   let parsedName = valueForLabels(lines, [
     "받으실\\s*분(?:의)?\\s*성함",
     "받는\\s*분(?:\\s*성명)?",
@@ -234,34 +375,63 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
   ]);
   const parsedPhone1 = valueForLabels(lines, ["전화번호", "연락처", "휴대폰", "핸드폰"]);
   const parsedPhone2 = valueForLabels(lines, ["기타\\s*연락처", "비상\\s*연락처"]);
-  const parsedZipCode = valueForLabels(lines, ["우편번호"]) || zipMatch?.[1] || "";
+  let parsedInstagramId = instagramId;
 
-  if ((!parsedName || !parsedAddress) && instagramId) {
+  for (const line of lines) {
+    const value = cleanValue(line);
+
+    if (looksLikePhone(value)) {
+      continue;
+    }
+
+    if (!parsedInstagramId && looksLikeInstagramId(value)) {
+      parsedInstagramId = firstInstagramId(value);
+      continue;
+    }
+
+    if (!parsedName && looksLikeKoreanName(value)) {
+      parsedName = firstKoreanName(value);
+      continue;
+    }
+
+    if (!parsedAddress && looksLikeAddress(value)) {
+      parsedAddress = firstAddress(value);
+    }
+  }
+
+  parsedInstagramId = parsedInstagramId || firstInstagramId(fullText);
+  parsedName = parsedName || firstKoreanName(fullText);
+  parsedAddress = parsedAddress || firstAddress(fullText);
+
+  if ((!parsedName || !parsedAddress) && parsedInstagramId) {
     const idLineIndex = lines.findIndex((line) => {
       const firstToken = cleanValue(line).split(/\s+/)[0];
-      return canonicalInstagramId(firstToken) === canonicalInstagramId(instagramId);
+      return canonicalInstagramId(firstToken) === canonicalInstagramId(parsedInstagramId);
     });
     const detailLines = idLineIndex >= 0 ? lines.slice(idLineIndex + 1) : lines;
-    const phoneLineIndex = detailLines.findIndex((line) => /(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/.test(line));
+    const phoneLineIndex = detailLines.findIndex((line) => looksLikePhone(line));
 
-    if (!parsedName && detailLines[0] && !/(?:01[016789])[-.\s]?\d{3,4}[-.\s]?\d{4}/.test(detailLines[0])) {
-      parsedName = cleanValue(detailLines[0]);
+    if (!parsedName && detailLines[0] && !looksLikePhone(detailLines[0])) {
+      parsedName = firstKoreanName(detailLines[0]) || cleanValue(detailLines[0]);
     }
 
     if (!parsedAddress) {
       const addressLines = detailLines.slice(1, phoneLineIndex >= 0 ? phoneLineIndex : undefined);
-      parsedAddress = addressLines.map(cleanValue).filter(Boolean).join(" ");
+      parsedAddress = firstAddress(addressLines.join(" ")) || addressLines.map(cleanValue).filter(Boolean).join(" ");
     }
   }
 
+  const normalizedPhone1 = normalizePhoneNumber(parsedPhone1 || phoneCandidate(fullText) || phoneMatches[0] || "");
+  const normalizedPhone2 = normalizePhoneNumber(parsedPhone2 || "") || normalizedPhone1;
+
   return {
-    instagramId,
+    instagramId: parsedInstagramId,
     shippingInfo: {
       name: parsedName,
       address: parsedAddress,
-      zipCode: parsedZipCode,
-      phone1: parsedPhone1 || phoneMatches[0] || "",
-      phone2: parsedPhone2 || phoneMatches[1] || "",
+      zipCode: "",
+      phone1: normalizedPhone1,
+      phone2: normalizedPhone2,
       memo: valueForLabels(lines, ["배송\\s*메세지", "배송\\s*메시지", "요청사항", "메모"]),
       items: valueForLabels(lines, ["품목명", "품목", "상품명", "상품", "주문\\s*내역"]),
     },
