@@ -10,6 +10,7 @@ import {
   canonicalInstagramId,
   readShippingRounds,
   ShippingRound,
+  writeShippingRounds,
 } from "./shipping/shipping-data";
 
 function HeaderIcon({ type }: { type: "search" | "list" | "save" }) {
@@ -412,6 +413,7 @@ export default function Home() {
   const [shippingTab, setShippingTab] = useState<ShippingTab>("waiting");
   const [shippingCounts, setShippingCounts] = useState<ShippingCounts>({ waiting: 0, ready: 0, completed: 0 });
   const [shippingRounds, setShippingRounds] = useState<ShippingRound[]>([]);
+  const [isStandaloneOrdersVisible, setIsStandaloneOrdersVisible] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
@@ -546,6 +548,17 @@ export default function Home() {
   useEffect(() => {
     savedSessionsRef.current = savedSessions;
   }, [savedSessions]);
+
+  useEffect(() => {
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    setIsStandaloneOrdersVisible(isLocalhost);
+
+    if (!isLocalhost && parseRoutePath(window.location.pathname).viewMode === "orders") {
+      replaceCurrentHistoryEntry("memo", null);
+      setViewMode("memo");
+      setActiveSessionId(null);
+    }
+  }, []);
 
   useEffect(() => {
     const updateHeaderHeight = () => {
@@ -856,6 +869,7 @@ export default function Home() {
   };
 
   const deleteTarget = savedSessions.find((session) => session.id === deleteTargetId);
+  const deleteOrderTarget = shippingRounds.find((round) => round.id === deleteTargetId);
 
   const requestDeleteSession = (id: string) => {
     setDeleteTargetId(id);
@@ -871,8 +885,17 @@ export default function Home() {
     }
 
     const id = deleteTargetId;
+    const isOrderTarget = id.startsWith("standalone-orders-");
 
-    setSavedSessions((current) => current.filter((session) => session.id !== id));
+    if (isOrderTarget) {
+      const nextRounds = shippingRounds.filter((round) => round.id !== id);
+      setShippingRounds(nextRounds);
+      writeShippingRounds(nextRounds);
+    } else {
+      setSavedSessions((current) => current.filter((session) => session.id !== id));
+      deleteRemoteSession(id).catch(() => undefined);
+    }
+
     setSwipedSessionId(null);
     setSwipeState(null);
     setDeleteTargetId(null);
@@ -883,9 +906,10 @@ export default function Home() {
       setGeneratedMemo("");
       setPaidNicknames(new Set());
       setDraftTitle(defaultSessionTitle());
+      if (isOrderTarget) {
+        navigateToView("list");
+      }
     }
-
-    deleteRemoteSession(id).catch(() => undefined);
   };
 
   const handleSessionPointerDown = (id: string, event: PointerEvent<HTMLElement>) => {
@@ -1109,13 +1133,15 @@ export default function Home() {
               </button>
             ) : viewMode === "list" ? (
               <>
-                <button
-                  type="button"
-                  onClick={startNewOrder}
-                  className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
-                >
-                  주문서 작업
-                </button>
+                {isStandaloneOrdersVisible ? (
+                  <button
+                    type="button"
+                    onClick={startNewOrder}
+                    className="h-10 rounded-md border border-[#E8E8EC] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#0A0A0A] transition hover:-translate-y-px hover:border-[#6366F1] hover:text-[#6366F1]"
+                  >
+                    주문서 작업
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={startNewMemo}
@@ -1275,20 +1301,30 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <h2 className="font-['General_Sans'] text-[18px] font-bold text-[#0A0A0A]">주문서</h2>
-            <span className="rounded-full bg-[#EEF2FF] px-3 py-1 font-['DM_Sans'] text-[12px] font-bold text-[#4F46E5]">
-              {standaloneOrderRounds.length}건
-            </span>
-          </div>
-          {standaloneOrderRounds.length > 0 ? (
+          {isStandaloneOrdersVisible ? (
+            <>
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <h2 className="font-['General_Sans'] text-[18px] font-bold text-[#0A0A0A]">주문서</h2>
+                <span className="rounded-full bg-[#EEF2FF] px-3 py-1 font-['DM_Sans'] text-[12px] font-bold text-[#4F46E5]">
+                  {standaloneOrderRounds.length}건
+                </span>
+              </div>
+              {standaloneOrderRounds.length > 0 ? (
             standaloneOrderRounds.map((round) => {
               const readyCount = round.participants.filter((participant) => participant.status === "READY").length;
               const waitingCount = round.participants.filter((participant) => participant.status === "WAITING").length;
               const completedCount = round.participants.filter((participant) => participant.status === "COMPLETED").length;
 
               return (
-                <article key={round.id} className="rounded-xl border border-[#E8E8EC] bg-white p-5">
+                <div key={round.id} className="relative overflow-hidden rounded-xl bg-[#EF4444]">
+                  <button
+                    type="button"
+                    onClick={() => requestDeleteSession(round.id)}
+                    className="absolute inset-y-0 right-0 w-28 font-['DM_Sans'] text-[14px] font-bold text-white"
+                  >
+                    삭제
+                  </button>
+                  <article className="relative rounded-xl border border-[#E8E8EC] bg-white p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1304,24 +1340,36 @@ export default function Home() {
                         저장 {new Date(round.updatedAt).toLocaleString("ko-KR")}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => loadOrderRound(round)}
-                      className="h-11 rounded-md bg-[#111827] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-black"
-                    >
-                      열기
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => requestDeleteSession(round.id)}
+                        className="h-11 rounded-md border border-[#FCA5A5] bg-white px-4 font-['DM_Sans'] text-[14px] font-medium text-[#DC2626] transition hover:-translate-y-px hover:bg-[#FEF2F2]"
+                      >
+                        삭제
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => loadOrderRound(round)}
+                        className="h-11 rounded-md bg-[#111827] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-black"
+                      >
+                        열기
+                      </button>
+                    </div>
                   </div>
-                </article>
+                  </article>
+                </div>
               );
             })
           ) : (
             <div className="rounded-xl border border-dashed border-[#E8E8EC] bg-white p-8 text-center font-['DM_Sans'] text-[14px] font-medium text-[#9C9C9C]">
               저장된 주문서가 없습니다.
             </div>
-          )}
+              )}
+            </>
+          ) : null}
         </section>
-      ) : viewMode === "orders" ? (
+      ) : viewMode === "orders" && isStandaloneOrdersVisible ? (
         <section className="mx-auto grid max-w-7xl gap-5 px-3 pt-5 md:px-6 md:pt-8">
           <ShippingWorkspace
             dateId={activeSessionId?.startsWith("standalone-orders-") ? activeSessionId : `standalone-orders-${localDateId()}`}
@@ -1429,12 +1477,12 @@ export default function Home() {
         </section>
       )}
 
-      {deleteTarget ? (
+      {deleteTarget || deleteOrderTarget ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4">
           <div className="w-full max-w-sm rounded-xl border border-[#E8E8EC] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
             <h2 className="font-['General_Sans'] text-[22px] font-bold leading-tight text-[#0A0A0A]">리스트 삭제</h2>
             <p className="mt-2 font-['DM_Sans'] text-[14px] font-medium leading-6 text-[#6B6B6B]">
-              {deleteTarget.title} 리스트를 삭제할까요?
+              {deleteTarget ? `${deleteTarget.title} 리스트를 삭제할까요?` : "주문서 작업을 삭제할까요?"}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
