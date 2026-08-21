@@ -156,6 +156,7 @@ function compactKoreanAddress(value: string) {
   const normalized = value
     .replace(/\s*([,()])\s*/g, "$1 ")
     .replace(/\s+/g, " ")
+    .replace(/[\s:：=\-–—•·*]+$/g, "")
     .trim();
   const tokens = normalized.split(" ").filter(Boolean);
   const singleCharacterTokens = tokens.filter((token) => /^[가-힣0-9]$/.test(token)).length;
@@ -171,6 +172,7 @@ function compactKoreanAddress(value: string) {
     .replace(/(\d+)(동|호)/g, "$1$2 ")
     .replace(/\s*([,()])\s*/g, "$1 ")
     .replace(/\s+/g, " ")
+    .replace(/[\s:：=\-–—•·*]+$/g, "")
     .trim();
 }
 
@@ -181,10 +183,22 @@ function stripFieldNoise(value: string) {
 }
 
 function phoneCandidate(value: string) {
-  const mobileMatch = value.match(/(?:\+?\s*8\s*2[\s.-]*)?(?:0[\s.-]*)?1[\s.-]*0(?:[\s.-]*\d){8}/);
+  const domesticMobileMatch = value.match(/(?<!\d)0[\s.-]*1[\s.-]*0(?:[\s.-]*\d){8}(?!\d)/);
 
-  if (mobileMatch) {
-    return mobileMatch[0];
+  if (domesticMobileMatch) {
+    return domesticMobileMatch[0];
+  }
+
+  const internationalMobileMatch = value.match(/(?<!\d)\+?\s*8\s*2[\s.-]*1[\s.-]*0(?:[\s.-]*\d){8}(?!\d)/);
+
+  if (internationalMobileMatch) {
+    return internationalMobileMatch[0];
+  }
+
+  const bareMobileMatch = value.match(/(?<!\d)1[\s.-]*0(?:[\s.-]*\d){8}(?!\d)/);
+
+  if (bareMobileMatch) {
+    return bareMobileMatch[0];
   }
 
   const looseNumberMatch = value.match(/(?:^|[^\d])((?:\d[\s.-]*){8,11})(?=$|[^\d])/);
