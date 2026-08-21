@@ -1233,9 +1233,7 @@ export default function Home() {
               const sessionParticipantIds = new Set(
                 sessionSummaries.map((summary) => canonicalInstagramId(summary.nickname)),
               );
-              const sessionRound = shippingRounds.find(
-                (round) => round.id === localDateId(new Date(session.createdAt)),
-              );
+              const sessionRound = shippingRounds.find((round) => round.id === `memo-${session.id}`);
               const waitingCount = sessionRound
                 ? sessionRound.participants.filter(
                     (participant) =>
