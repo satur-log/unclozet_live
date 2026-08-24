@@ -415,6 +415,7 @@ export default function Home() {
   const [shippingRounds, setShippingRounds] = useState<ShippingRound[]>([]);
   const [isStandaloneOrdersVisible, setIsStandaloneOrdersVisible] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMemoComposerCollapsed, setIsMemoComposerCollapsed] = useState(false);
   const [paidNicknames, setPaidNicknames] = useState<Set<string>>(new Set());
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -627,10 +628,12 @@ export default function Home() {
     if (routeSession) {
       setMemo(routeSession.memo);
       setGeneratedMemo(memoWithLineTotals(routeSession.memo));
+      setIsMemoComposerCollapsed(true);
       setPaidNicknames(new Set(routeSession.paidNicknames));
       setActiveSessionId(routeSession.id);
     } else if (savedMemo) {
       setMemo(savedMemo);
+      setIsMemoComposerCollapsed(false);
     }
 
     if (!routeSession && savedPaidNicknames) {
@@ -679,6 +682,7 @@ export default function Home() {
           if (remoteRouteSession) {
             setMemo(remoteRouteSession.memo);
             setGeneratedMemo(memoWithLineTotals(remoteRouteSession.memo));
+            setIsMemoComposerCollapsed(true);
             setPaidNicknames(new Set(remoteRouteSession.paidNicknames));
             setActiveSessionId(remoteRouteSession.id);
           }
@@ -988,6 +992,7 @@ export default function Home() {
   const loadSession = (session: SavedSession) => {
     setMemo(session.memo);
     setGeneratedMemo(memoWithLineTotals(session.memo));
+    setIsMemoComposerCollapsed(true);
     setPaidNicknames(new Set(session.paidNicknames));
     setActiveSessionId(session.id);
     navigateToView("memo", session.id);
@@ -1018,6 +1023,7 @@ export default function Home() {
   const startNewMemo = () => {
     setMemo("");
     setGeneratedMemo("");
+    setIsMemoComposerCollapsed(false);
     setPaidNicknames(new Set());
     setActiveSessionId(null);
     setDraftTitle(defaultSessionTitle());
@@ -1046,6 +1052,7 @@ export default function Home() {
 
   const handleGenerateMemoWithTotals = () => {
     setGeneratedMemo(memoWithLineTotals(memo));
+    setIsMemoComposerCollapsed(false);
   };
 
   const handleCopyGeneratedMemo = () => {
@@ -1054,6 +1061,7 @@ export default function Home() {
     }
 
     navigator.clipboard?.writeText(generatedMemo).catch(() => undefined);
+    setIsMemoComposerCollapsed(true);
   };
 
   const toggleSearch = () => {
@@ -1399,53 +1407,92 @@ export default function Home() {
             </div>
           </div>
 
-          <div
-            className={`grid gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4 ${
-              generatedMemo ? "md:grid-cols-2 md:gap-4" : ""
-            }`}
-          >
-            <div className="grid min-w-0 grid-rows-[1fr_auto] gap-3">
-              <textarea
-                ref={textareaRef}
-                value={memo}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
-                className="min-h-40 w-full resize-y rounded-lg border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[16px] leading-7 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:min-h-48 md:text-[17px]"
-                placeholder="예: 홍길동 - 1.5 + 2.0 + 0.5"
-                spellCheck={false}
-              />
-              {!generatedMemo ? (
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleGenerateMemoWithTotals}
-                    disabled={!memo.trim()}
-                    className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
-                  >
-                    확인
-                  </button>
+          {generatedMemo && isMemoComposerCollapsed ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4">
+              <div className="min-w-0">
+                <p className="font-['DM_Sans'] text-[13px] font-bold text-[#52525B]">메모 입력 접힘</p>
+                <p className="mt-1 truncate font-['JetBrains_Mono'] text-[12px] text-[#9C9C9C]">
+                  {summaries.length}명 · {numberWithComma(grandQuantity)}개 · {won(grandTotal)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsMemoComposerCollapsed(false)}
+                  className="h-9 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#0A0A0A] transition hover:border-[#6366F1] hover:text-[#6366F1]"
+                >
+                  펼치기
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyGeneratedMemo}
+                  className="h-9 rounded-md bg-[#111827] px-3 font-['DM_Sans'] text-[13px] font-medium text-white transition hover:bg-black"
+                >
+                  복사
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`grid gap-3 rounded-xl border border-[#E8E8EC] bg-white p-3 md:p-4 ${
+                generatedMemo ? "md:grid-cols-2 md:gap-4" : ""
+              }`}
+            >
+              <div className="grid min-w-0 grid-rows-[1fr_auto] gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">메모 입력</p>
+                  {generatedMemo ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsMemoComposerCollapsed(true)}
+                      className="h-8 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[12px] font-medium text-[#6B6B6B] transition hover:border-[#6366F1] hover:text-[#6366F1]"
+                    >
+                      접기
+                    </button>
+                  ) : null}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  value={memo}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setMemo(event.target.value)}
+                  className={`${generatedMemo ? "min-h-24 md:min-h-32" : "min-h-40 md:min-h-48"} w-full resize-y rounded-lg border border-[#E8E8EC] bg-white p-4 font-['JetBrains_Mono'] text-[16px] leading-7 text-[#0A0A0A] outline-none transition placeholder:text-[#9C9C9C] focus:border-[#6366F1] focus:ring-[3px] focus:ring-[#6366F1]/15 md:text-[17px]`}
+                  placeholder="예: 홍길동 - 1.5 + 2.0 + 0.5"
+                  spellCheck={false}
+                />
+                {!generatedMemo ? (
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateMemoWithTotals}
+                      disabled={!memo.trim()}
+                      className="h-11 rounded-md bg-[#6366F1] px-5 font-['DM_Sans'] text-[14px] font-medium text-white transition hover:-translate-y-px hover:bg-[#4F46E5] disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#9C9C9C]"
+                    >
+                      확인
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              {generatedMemo ? (
+                <div className="grid min-w-0 grid-rows-[auto_1fr] gap-2 border-t border-[#E8E8EC] pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">합계 포함 복사용 메모</p>
+                    <button
+                      type="button"
+                      onClick={handleCopyGeneratedMemo}
+                      className="h-9 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#0A0A0A] transition hover:border-[#6366F1] hover:text-[#6366F1]"
+                    >
+                      복사
+                    </button>
+                  </div>
+                  <textarea
+                    value={generatedMemo}
+                    readOnly
+                    className="min-h-24 h-full w-full resize-y rounded-lg border border-[#E8E8EC] bg-[#FAFAFA] p-4 font-['JetBrains_Mono'] text-[15px] leading-7 text-[#0A0A0A] outline-none md:min-h-32"
+                  />
                 </div>
               ) : null}
             </div>
-            {generatedMemo ? (
-              <div className="grid min-w-0 grid-rows-[auto_1fr] gap-2 border-t border-[#E8E8EC] pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-['DM_Sans'] text-[13px] font-medium text-[#6B6B6B]">합계 포함 복사용 메모</p>
-                  <button
-                    type="button"
-                    onClick={handleCopyGeneratedMemo}
-                    className="h-9 rounded-md border border-[#E8E8EC] bg-white px-3 font-['DM_Sans'] text-[13px] font-medium text-[#0A0A0A] transition hover:border-[#6366F1] hover:text-[#6366F1]"
-                  >
-                    복사
-                  </button>
-                </div>
-                <textarea
-                  value={generatedMemo}
-                  readOnly
-                  className="min-h-40 h-full w-full resize-y rounded-lg border border-[#E8E8EC] bg-[#FAFAFA] p-4 font-['JetBrains_Mono'] text-[15px] leading-7 text-[#0A0A0A] outline-none md:min-h-48"
-                />
-              </div>
-            ) : null}
-          </div>
+          )}
 
           <section>
             <ShippingWorkspace
