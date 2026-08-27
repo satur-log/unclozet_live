@@ -29,6 +29,12 @@ export type ParsedKakaoOrder = {
 };
 
 const SHIPPING_ROUNDS_KEY = "unclozet-shipping-rounds-v1";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseRestBase = SUPABASE_URL
+  ? SUPABASE_URL.replace(/\/+$/, "").replace(/\/rest\/v1$/, "")
+  : "";
+const hasSupabase = Boolean(supabaseRestBase && SUPABASE_ANON_KEY);
 
 export const MAX_PARTICIPANTS = 1000;
 
@@ -102,6 +108,115 @@ export function readShippingRounds(): ShippingRound[] {
 
 export function writeShippingRounds(rounds: ShippingRound[]) {
   window.localStorage.setItem(SHIPPING_ROUNDS_KEY, JSON.stringify(rounds));
+}
+
+function sortShippingRounds(rounds: ShippingRound[]) {
+  return [...rounds].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function isShippingRound(value: unknown): value is ShippingRound {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.id === "string" &&
+    Array.isArray(candidate.participants) &&
+    candidate.participants.every(isShippingParticipant) &&
+    typeof candidate.createdAt === "string" &&
+    typeof candidate.updatedAt === "string"
+  );
+}
+
+export function mergeShippingRounds(localRounds: ShippingRound[], remoteRounds: ShippingRound[]) {
+  const merged = new Map<string, ShippingRound>();
+
+  [...localRounds, ...remoteRounds].forEach((round) => {
+    const existing = merged.get(round.id);
+
+    if (!existing || new Date(round.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+      merged.set(round.id, round);
+    }
+  });
+
+  return sortShippingRounds(Array.from(merged.values()));
+}
+
+export async function fetchRemoteShippingRounds() {
+  if (!hasSupabase) {
+    return [];
+  }
+
+  const response = await fetch(`${supabaseRestBase}/rest/v1/shipping_rounds?order=updated_at.desc`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load remote shipping rounds");
+  }
+
+  const rows = await response.json();
+
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+
+  return rows
+    .map((row) => ({
+      id: String(row.id),
+      participants: row.participants,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    }))
+    .filter(isShippingRound);
+}
+
+export async function saveRemoteShippingRound(round: ShippingRound) {
+  if (!hasSupabase) {
+    return;
+  }
+
+  const response = await fetch(`${supabaseRestBase}/rest/v1/shipping_rounds?on_conflict=id`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({
+      id: round.id,
+      participants: round.participants,
+      created_at: round.createdAt,
+      updated_at: round.updatedAt,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to save remote shipping round");
+  }
+}
+
+export async function deleteRemoteShippingRound(id: string) {
+  if (!hasSupabase) {
+    return;
+  }
+
+  const response = await fetch(`${supabaseRestBase}/rest/v1/shipping_rounds?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      apikey: SUPABASE_ANON_KEY ?? "",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete remote shipping round");
+  }
 }
 
 export function seedShippingRound(dateId: string, instagramIds: string[]) {

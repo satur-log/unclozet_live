@@ -8,6 +8,7 @@ import {
   normalizePhoneNumber,
   parseKakaoOrder,
   readShippingRounds,
+  saveRemoteShippingRound,
   saveShippingRound,
   seedShippingRound,
   ShippingInfo,
@@ -312,6 +313,7 @@ export default function ShippingWorkspace({
     setRound(enrichedRound);
     if (enrichedRound.participants.some((participant, index) => participant !== seededRound.participants[index])) {
       saveShippingRound(enrichedRound);
+      saveRemoteShippingRound(enrichedRound).catch(() => undefined);
     }
   }, [dateId, participantKey, standalone]);
 
@@ -404,7 +406,12 @@ export default function ShippingWorkspace({
     });
   }, [highlightedParticipantId, tab]);
 
-  const persistRound = (nextRound: ShippingRound) => setRound(saveShippingRound(nextRound));
+  const persistRound = (nextRound: ShippingRound) => {
+    const savedRound = saveShippingRound(nextRound);
+    setRound(savedRound);
+    saveRemoteShippingRound(savedRound).catch(() => undefined);
+    return savedRound;
+  };
 
   const resetParser = () => {
     setRawText("");
@@ -452,11 +459,10 @@ export default function ShippingWorkspace({
 
     if (!participant && standalone && requestedId) {
       participant = { instagramId: requestedId.replace(/^@/, ""), status: "WAITING", shippingInfo: null };
-      workingRound = saveShippingRound({
+      workingRound = persistRound({
         ...workingRound,
         participants: [...workingRound.participants, participant],
       });
-      setRound(workingRound);
     }
 
     if (!participant) {

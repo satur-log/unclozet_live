@@ -8,7 +8,11 @@ import ShippingWorkspace, {
 } from "./shipping/ShippingWorkspace";
 import {
   canonicalInstagramId,
+  deleteRemoteShippingRound,
+  fetchRemoteShippingRounds,
+  mergeShippingRounds,
   readShippingRounds,
+  saveRemoteShippingRound,
   ShippingRound,
   writeShippingRounds,
 } from "./shipping/shipping-data";
@@ -102,7 +106,10 @@ const LOCAL_DATA_STORAGE_KEYS = [
 ];
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const supabaseRestBase = SUPABASE_URL
+  ? SUPABASE_URL.replace(/\/+$/, "").replace(/\/rest\/v1$/, "")
+  : "";
+const hasSupabase = Boolean(supabaseRestBase && SUPABASE_ANON_KEY);
 const EMPTY_SHIPPING_SUMMARIES: ShippingSummary[] = [];
 
 function normalizePrice(value: string) {
@@ -331,7 +338,7 @@ async function fetchRemoteSessions() {
   }
 
   const response = await fetch(
-    `${SUPABASE_URL}/rest/v1/live_memos?order=updated_at.desc`,
+    `${supabaseRestBase}/rest/v1/live_memos?order=updated_at.desc`,
     {
       headers: {
         apikey: SUPABASE_ANON_KEY ?? "",
@@ -371,7 +378,7 @@ async function saveRemoteSession(session: SavedSession) {
     return;
   }
 
-  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?on_conflict=id`, {
+  const response = await fetch(`${supabaseRestBase}/rest/v1/live_memos?on_conflict=id`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_ANON_KEY ?? "",
@@ -388,6 +395,10 @@ async function saveRemoteSession(session: SavedSession) {
       updated_at: session.updatedAt,
     }),
   });
+
+  if (!response.ok) {
+    throw new Error("Failed to save remote session");
+  }
 }
 
 async function deleteRemoteSession(id: string) {
@@ -395,13 +406,17 @@ async function deleteRemoteSession(id: string) {
     return;
   }
 
-  await fetch(`${SUPABASE_URL}/rest/v1/live_memos?id=eq.${encodeURIComponent(id)}`, {
+  const response = await fetch(`${supabaseRestBase}/rest/v1/live_memos?id=eq.${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: {
       apikey: SUPABASE_ANON_KEY ?? "",
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     },
   });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete remote session");
+  }
 }
 
 export default function Home() {
@@ -618,6 +633,7 @@ export default function Home() {
     const savedPaidNicknames = window.localStorage.getItem(PAID_STORAGE_KEY);
     const savedActiveSessionId = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
     const localSessions = readLocalSessions();
+    const localShippingRounds = readShippingRounds();
     const initialRoute = parseRoutePath(window.location.pathname);
     const routeSession = initialRoute.activeSessionId
       ? localSessions.find((session) => session.id === initialRoute.activeSessionId)
@@ -649,7 +665,7 @@ export default function Home() {
     }
 
     setSavedSessions(sortSavedSessions(localSessions));
-    setShippingRounds(readShippingRounds());
+    setShippingRounds(localShippingRounds);
     window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(sortSavedSessions(localSessions)));
 
     if (initialRoute.viewMode === "list" || initialRoute.viewMode === "orders") {
@@ -670,13 +686,22 @@ export default function Home() {
       return;
     }
 
-    fetchRemoteSessions()
-      .then((remoteSessions) => {
-        if (remoteSessions.length === 0) {
-          return;
+    Promise.all([fetchRemoteSessions(), fetchRemoteShippingRounds()])
+      .then(([remoteSessions, remoteShippingRounds]) => {
+        localSessions.forEach((session) => {
+          saveRemoteSession(session).catch(() => undefined);
+        });
+        localShippingRounds.forEach((round) => {
+          saveRemoteShippingRound(round).catch(() => undefined);
+        });
+
+        if (remoteShippingRounds.length > 0) {
+          const mergedShippingRounds = mergeShippingRounds(localShippingRounds, remoteShippingRounds);
+          writeShippingRounds(mergedShippingRounds);
+          setShippingRounds(mergedShippingRounds);
         }
 
-        if (initialRoute.activeSessionId && !routeSession) {
+        if (remoteSessions.length > 0 && initialRoute.activeSessionId && !routeSession) {
           const remoteRouteSession = remoteSessions.find((session) => session.id === initialRoute.activeSessionId);
 
           if (remoteRouteSession) {
@@ -688,19 +713,23 @@ export default function Home() {
           }
         }
 
-        setSavedSessions((current) => {
-          const merged = new Map<string, SavedSession>();
+        if (remoteSessions.length > 0) {
+          setSavedSessions((current) => {
+            const merged = new Map<string, SavedSession>();
 
-          [...current, ...remoteSessions].forEach((session) => {
-            const existing = merged.get(session.id);
+            [...current, ...remoteSessions].forEach((session) => {
+              const existing = merged.get(session.id);
 
-            if (!existing || new Date(session.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
-              merged.set(session.id, session);
-            }
+              if (!existing || new Date(session.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+                merged.set(session.id, session);
+              }
+            });
+
+            const mergedSessions = sortSavedSessions(Array.from(merged.values()));
+            window.localStorage.setItem(SAVED_SESSIONS_STORAGE_KEY, JSON.stringify(mergedSessions));
+            return mergedSessions;
           });
-
-          return sortSavedSessions(Array.from(merged.values()));
-        });
+        }
       })
       .catch(() => undefined);
   }, []);
@@ -895,6 +924,7 @@ export default function Home() {
       const nextRounds = shippingRounds.filter((round) => round.id !== id);
       setShippingRounds(nextRounds);
       writeShippingRounds(nextRounds);
+      deleteRemoteShippingRound(id).catch(() => undefined);
     } else {
       setSavedSessions((current) => current.filter((session) => session.id !== id));
       deleteRemoteSession(id).catch(() => undefined);
