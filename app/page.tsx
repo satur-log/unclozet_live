@@ -264,7 +264,16 @@ function localDateId(date = new Date()) {
 }
 
 function sortSavedSessions(sessions: SavedSession[]) {
-  return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return [...sessions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function haveSameNicknames(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  return left.every((nickname) => rightSet.has(nickname));
 }
 
 function routePath(viewMode: ViewMode, activeSessionId: string | null) {
@@ -338,7 +347,7 @@ async function fetchRemoteSessions() {
   }
 
   const response = await fetch(
-    `${supabaseRestBase}/rest/v1/live_memos?order=updated_at.desc`,
+    `${supabaseRestBase}/rest/v1/live_memos?order=created_at.desc`,
     {
       headers: {
         apikey: SUPABASE_ANON_KEY ?? "",
@@ -785,10 +794,16 @@ export default function Home() {
           return current;
         }
 
+        const paidList = Array.from(paidNicknames);
+
+        if (existing.memo === memo && haveSameNicknames(existing.paidNicknames, paidList)) {
+          return current;
+        }
+
         nextSession = {
           ...existing,
           memo,
-          paidNicknames: Array.from(paidNicknames),
+          paidNicknames: paidList,
           updatedAt: new Date().toISOString(),
         };
 
