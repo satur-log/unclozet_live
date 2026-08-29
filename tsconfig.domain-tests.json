@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": ".test-dist",
+    "noEmit": false,
+    "incremental": false
+  },
+  "include": [
+    "app/dashboard-v2/types.ts",
+    "app/dashboard-v2/settlement.ts",
+    "app/dashboard-v2/shipping-parser.ts",
+    "app/dashboard-v2/workbook.ts",
+    "app/dashboard-v2/model.ts",
+    "app/dashboard-v2/mock-data.ts",
+    "app/dashboard-v2/repository.ts",
+    "tests/**/*.test.ts"
+  ]
+}

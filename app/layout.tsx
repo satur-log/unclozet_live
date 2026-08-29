@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { DashboardProvider } from "./dashboard-v2/provider";
 
 export const metadata: Metadata = {
-  title: "언클로젯 라이브",
-  description: "방송 중 메모를 실시간으로 파싱하고 합산하는 iPad 최적화 웹 앱",
+  title: "언클로젯 운영 대시보드 V2",
+  description: "라이브커머스 주문 정산 및 출고 운영 대시보드 V2",
 };
 
 export const viewport: Viewport = {
@@ -19,8 +20,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
-      <body>{children}</body>
+    <html lang="ko" className="font-sans">
+      <body><DashboardProvider>{children}</DashboardProvider></body>
     </html>
   );
 }

@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { analyzeSettlement } from "../app/dashboard-v2/settlement";
+import { normalizePhoneNumber, parseKakaoOrder } from "../app/dashboard-v2/shipping-parser";
+import {
+  addBroadcast, confirmPreviousInfo, deleteBroadcast, deleteCustomer, editCustomer, editOrder, exportReadyOrders, registerOrder,
+  resolveConflict, restoreOrder, saveSettlement,
+} from "../app/dashboard-v2/model";
+import { createMockState } from "../app/dashboard-v2/mock-data";
+import { isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
+import type { DashboardState, Delivery } from "../app/dashboard-v2/types";
+
+const info = (room = "101"): Delivery => ({ name: "테스트가람", address: `테스트시 가상구 샘플로 0 ${room}호`, phone: "010-1234-5678" });
+function emptyState(): DashboardState { return { version: 2, broadcasts: [], customers: [] }; }
+function setup(instagramIds = ["case.dot", "2.case__under"]) {
+  let state = emptyState(); const added = addBroadcast(state, "테스트 방송"); state = added.state;
+  state = saveSettlement(state, added.broadcastId, instagramIds.map((name, i) => `${name} - ${i + 1}번 ${i + 1}.5`).join("\n"));
+  return { state, broadcastId: added.broadcastId };
+}
+
+test("existing settlement parser behavior is retained and invalid residue is reported", () => {
+  const parsed = analyzeSettlement("case.dot - 1번 1.5 + 2번 2.0\ncase__under - 15,000\nbroken - 1.2 + 메모확인");
+  assert.equal(parsed.buyers.length, 2);
+  assert.equal(parsed.buyers[0].total, 35_000);
+  assert.equal(parsed.buyers[1].total, 15_000);
+  assert.equal(parsed.errors.length, 1);
+  assert.match(parsed.announcement, /case\.dot/);
+});
+
+test("order parser accepts dot, consecutive underscore and digit-leading IDs", () => {
+  for (const instagramId of ["case.dot", "case__under", "2.case__under"]) {
+    const parsed = parseKakaoOrder(`인스타 아이디: ${instagramId}\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678`, []);
+    assert.equal(parsed.instagramId, instagramId);
+    assert.equal(parsed.shippingInfo.phone1, "010-1234-5678");
+  }
+
+  const multiLineFreeform = parseKakaoOrder("gwangsoo_m, 이광수\n광주시 동구 필문대로 1\n01077774444", []);
+  assert.equal(multiLineFreeform.instagramId, "gwangsoo_m");
+  assert.equal(multiLineFreeform.shippingInfo.name, "이광수");
+  assert.equal(multiLineFreeform.shippingInfo.address, "광주시 동구 필문대로 1");
+  assert.equal(multiLineFreeform.shippingInfo.phone1, "010-7777-4444");
+
+  const oneLineFreeform = parseKakaoOrder("areum_glow 백아름 서울시 동작구 사당로 12 010-5555-6666", []);
+  assert.equal(oneLineFreeform.instagramId, "areum_glow");
+  assert.equal(oneLineFreeform.shippingInfo.name, "백아름");
+  assert.equal(oneLineFreeform.shippingInfo.address, "서울시 동작구 사당로 12");
+  assert.equal(oneLineFreeform.shippingInfo.phone1, "010-5555-6666");
+  assert.equal(normalizePhoneNumber("12345678"), "12345678");
+});
+
+test("new and unchanged customer orders become READY, changed customer waits for a choice", () => {
+  let { state, broadcastId } = setup(["new.case", "same.case", "change.case"]);
+  state.customers = [
+    { id: "same", instagramId: "same.case", delivery: info("201"), updatedAt: new Date().toISOString() },
+    { id: "change", instagramId: "change.case", delivery: info("301"), updatedAt: new Date().toISOString() },
+  ];
+  state = registerOrder(state, broadcastId, `인스타 아이디: new.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  state = registerOrder(state, broadcastId, `인스타 아이디: same.case\n성함: ${info("201").name}\n주소: ${info("201").address}\n연락처: ${info("201").phone}`).state;
+  const changed = registerOrder(state, broadcastId, `인스타 아이디: change.case\n성함: ${info("302").name}\n주소: ${info("302").address}\n연락처: ${info("302").phone}`);
+  state = changed.state;
+  const orders = state.broadcasts[0].orders;
+  assert.equal(orders.find((o) => o.instagramId === "new.case")?.status, "READY");
+  assert.equal(orders.find((o) => o.instagramId === "same.case")?.status, "READY");
+  assert.equal(orders.find((o) => o.instagramId === "change.case")?.status, "WAITING");
+  assert.ok(orders.find((o) => o.instagramId === "change.case")?.conflict);
+  state = resolveConflict(state, broadcastId, changed.orderId, "incoming");
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === changed.orderId)?.status, "READY");
+  assert.match(state.customers.find((c) => c.id === "change")?.delivery.address ?? "", /302호/);
+});
+
+test("historical information requires confirmation and incomplete orders wait until fixed", () => {
+  let { state, broadcastId } = setup(["return.case", "missing.case"]);
+  state.customers = [{ id: "return", instagramId: "return.case", delivery: info(), updatedAt: new Date().toISOString() }];
+  // Reapply settlement so the customer card is prefilled in the new broadcast.
+  state = saveSettlement(state, broadcastId, "return.case - 1.5\nmissing.case - 2.0");
+  const historical = state.broadcasts[0].orders.find((o) => o.instagramId === "return.case")!;
+  assert.equal(historical.status, "WAITING");
+  assert.equal(historical.registrationConfirmed, false);
+  state = confirmPreviousInfo(state, broadcastId, historical.id);
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === historical.id)?.status, "READY");
+  const missing = registerOrder(state, broadcastId, "인스타 아이디: missing.case\n성함: 테스트보라\n주소:\n연락처: 01012345678");
+  state = missing.state;
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === missing.orderId)?.status, "WAITING");
+  state = editOrder(state, broadcastId, missing.orderId, info("401"));
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === missing.orderId)?.status, "READY");
+});
+
+test("READY information remains editable and export handles every READY order atomically", () => {
+  let { state, broadcastId } = setup(["ready.one", "ready.two"]);
+  for (const instagramId of ["ready.one", "ready.two"]) state = registerOrder(state, broadcastId, `인스타 아이디: ${instagramId}\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const order = state.broadcasts[0].orders.find((o) => o.instagramId === "ready.one")!;
+  state = editOrder(state, broadcastId, order.id, info("777"));
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.status, "READY");
+  assert.match(state.broadcasts[0].orders.find((o) => o.id === order.id)?.delivery?.address ?? "", /777호/);
+  const before = state;
+  assert.throws(() => exportReadyOrders(state, broadcastId, () => { throw new Error("download failed"); }), /download failed/);
+  assert.equal(before.broadcasts[0].orders.filter((o) => o.status === "READY").length, 2);
+  let workbook = new Uint8Array(); let name = "";
+  state = exportReadyOrders(state, broadcastId, (bytes, fileName) => { workbook = new Uint8Array(bytes); name = fileName; });
+  assert.equal(String.fromCharCode(workbook[0], workbook[1]), "PK");
+  const workbookText = new TextDecoder().decode(workbook);
+  assert.match(workbookText, /받는분성명/);
+  assert.match(workbookText, /010-1234-5678/);
+  assert.match(workbookText, /<mergeCell ref="A1:G1"\/>/);
+  const firstDataRow = workbookText.match(/<row r="3">(.+?)<\/row>/)?.[1] ?? "";
+  assert.equal((firstDataRow.match(/<c /g) ?? []).length, 7);
+  assert.match(firstDataRow, /ready\.one/);
+  assert.doesNotMatch(workbookText, /배송 메모 테스트/);
+  assert.match(name, /2건\.xlsx$/);
+  assert.equal(state.broadcasts[0].orders.filter((o) => o.status === "COMPLETED").length, 2);
+  state = restoreOrder(state, broadcastId, order.id);
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.status, "READY");
+});
+
+test("customer deletion leaves historical broadcast orders intact", () => {
+  let { state, broadcastId } = setup(["delete.case"]);
+  state = registerOrder(state, broadcastId, `인스타 아이디: delete.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const customer = state.customers[0]; const orderCount = state.broadcasts.reduce((n, b) => n + b.orders.length, 0);
+  state = deleteCustomer(state, customer.id);
+  assert.equal(state.customers.some((c) => c.id === customer.id), false);
+  assert.equal(state.broadcasts.reduce((n, b) => n + b.orders.length, 0), orderCount);
+});
+
+test("customer information can be edited and is normalized", () => {
+  let { state, broadcastId } = setup(["edit.case"]);
+  state = registerOrder(state, broadcastId, `인스타 아이디: edit.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const customer = state.customers[0];
+  state = editCustomer(state, customer.id, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "01099998888" });
+  assert.deepEqual(state.customers[0].delivery, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "010-9999-8888" });
+  assert.throws(() => editCustomer(state, customer.id, { name: "", address: "", phone: "123" }), /성명, 주소/);
+});
+
+test("broadcast deletion removes only the selected broadcast", () => {
+  let state = emptyState();
+  const first = addBroadcast(state, "첫 번째 방송"); state = first.state;
+  const second = addBroadcast(state, "두 번째 방송"); state = second.state;
+  state = deleteBroadcast(state, first.broadcastId);
+  assert.deepEqual(state.broadcasts.map((broadcast) => broadcast.id), [second.broadcastId]);
+});
+
+test("repository reads and writes only the V2 mock namespace and rejects corrupt data", () => {
+  const values = new Map<string, string>(); const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  const state = loadMockState(storage); assert.ok(isDashboardState(state)); assert.equal(state.broadcasts.length, 0); assert.equal(state.customers.length, 0); saveMockState(storage, state);
+  assert.deepEqual([...values.keys()], [STORAGE_KEY]);
+  values.set(STORAGE_KEY, JSON.stringify({ version: 2, broadcasts: "bad", customers: [] }));
+  assert.throws(() => loadMockState(storage), /형식/);
+});
