@@ -19,12 +19,21 @@ function setup(instagramIds = ["case.dot", "2.case__under"]) {
 }
 
 test("existing settlement parser behavior is retained and invalid residue is reported", () => {
-  const parsed = analyzeSettlement("case.dot - 1번 1.5 + 2번 2.0\ncase__under - 15,000\nbroken - 1.2 + 메모확인");
+  const parsed = analyzeSettlement("배송 안내 문구는 정산에서 제외\ncase.dot - 1번 1.5 + 2번 2.0\ncase__under - 15,000\nbroken - 1.2 + 메모확인");
   assert.equal(parsed.buyers.length, 2);
   assert.equal(parsed.buyers[0].total, 35_000);
   assert.equal(parsed.buyers[1].total, 15_000);
   assert.equal(parsed.errors.length, 1);
   assert.match(parsed.announcement, /case\.dot/);
+  assert.doesNotMatch(parsed.announcement, /배송 안내/);
+});
+
+test("non-settlement prose is ignored without adding errors to valid orders", () => {
+  let { state, broadcastId } = setup(["case.dot"]);
+  state = saveSettlement(state, broadcastId, "방송 공지입니다\ncase.dot - 1.5\nbroken.case - 1.2 + 메모확인\n오늘 배송은 쉽니다");
+  assert.equal(state.broadcasts[0].settlementErrors.length, 1);
+  state = registerOrder(state, broadcastId, `인스타 아이디: case.dot\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  assert.equal(state.broadcasts[0].orders.find((order) => order.instagramId === "case.dot")?.status, "READY");
 });
 
 test("order parser accepts dot, consecutive underscore and digit-leading IDs", () => {
@@ -92,6 +101,9 @@ test("READY information remains editable and export handles every READY order at
   state = editOrder(state, broadcastId, order.id, info("777"));
   assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.status, "READY");
   assert.match(state.broadcasts[0].orders.find((o) => o.id === order.id)?.delivery?.address ?? "", /777호/);
+  state = editOrder(state, broadcastId, order.id, info("777"), "@revised.case");
+  assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.instagramId, "revised.case");
+  assert.ok(state.customers.some((customer) => customer.instagramId === "revised.case"));
   const before = state;
   assert.throws(() => exportReadyOrders(state, broadcastId, () => { throw new Error("download failed"); }), /download failed/);
   assert.equal(before.broadcasts[0].orders.filter((o) => o.status === "READY").length, 2);
@@ -104,7 +116,7 @@ test("READY information remains editable and export handles every READY order at
   assert.match(workbookText, /<mergeCell ref="A1:G1"\/>/);
   const firstDataRow = workbookText.match(/<row r="3">(.+?)<\/row>/)?.[1] ?? "";
   assert.equal((firstDataRow.match(/<c /g) ?? []).length, 7);
-  assert.match(firstDataRow, /ready\.one/);
+  assert.match(firstDataRow, /revised\.case/);
   assert.doesNotMatch(workbookText, /배송 메모 테스트/);
   assert.match(name, /2건\.xlsx$/);
   assert.equal(state.broadcasts[0].orders.filter((o) => o.status === "COMPLETED").length, 2);
@@ -121,12 +133,13 @@ test("customer deletion leaves historical broadcast orders intact", () => {
   assert.equal(state.broadcasts.reduce((n, b) => n + b.orders.length, 0), orderCount);
 });
 
-test("customer information can be edited and is normalized", () => {
+test("customer information and Instagram ID can be edited and are normalized", () => {
   let { state, broadcastId } = setup(["edit.case"]);
   state = registerOrder(state, broadcastId, `인스타 아이디: edit.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
   const customer = state.customers[0];
-  state = editCustomer(state, customer.id, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "01099998888" });
+  state = editCustomer(state, customer.id, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "01099998888" }, "@updated.case");
   assert.deepEqual(state.customers[0].delivery, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "010-9999-8888" });
+  assert.equal(state.customers[0].instagramId, "updated.case");
   assert.throws(() => editCustomer(state, customer.id, { name: "", address: "", phone: "123" }), /성명, 주소/);
 });
 

@@ -159,6 +159,9 @@ export function analyzeSettlement(text: string) {
   const accepted: string[] = [];
   text.split(/\r?\n/).forEach((original, index) => {
     if (!original.trim()) return;
+    // 정산 형식으로 시작하지 않는 안내문과 메모는 공지 생성 대상에서
+    // 조용히 제외한다. Instagram ID처럼 보이는 행만 형식 검증한다.
+    if (!/^\s*@?[A-Za-z0-9._]+\s*[:\-–—]\s*.+$/.test(original)) return;
     const line = settlementInputLine(original);
     const parsed = parseMemoLine(line);
     const content = line.match(/^\s*.*?\s*[:\-–—]\s*(.+?)\s*$/)?.[1] ?? "";

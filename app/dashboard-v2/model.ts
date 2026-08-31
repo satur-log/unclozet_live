@@ -35,7 +35,6 @@ export function orderIssues(broadcast: Broadcast, order: Order): Issue[] {
   if (!order.settlementId || !broadcast.settlements.some((s) => s.id === order.settlementId)) {
     issues.push({ code: "MATCH", message: "정산 주문 미연결" });
   }
-  if (broadcast.settlementErrors.length) issues.push({ code: "SETTLEMENT", message: "정산 계산 오류 확인" });
   if (order.conflict) issues.push({ code: "CONFLICT", message: "기존 고객정보와 다름" });
   for (const message of order.extractionWarnings) issues.push({ code: "EXTRACTION", message });
   return issues;
@@ -150,16 +149,22 @@ export function confirmPreviousInfo(state: DashboardState, broadcastId: string, 
   return replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? next : o) });
 }
 
-export function editOrder(state: DashboardState, broadcastId: string, orderId: string, delivery: Delivery) {
+export function editOrder(state: DashboardState, broadcastId: string, orderId: string, delivery: Delivery, draftInstagramId = "") {
   const broadcast = getBroadcast(state, broadcastId);
   const order = broadcast.orders.find((o) => o.id === orderId);
   if (!order || order.status === "COMPLETED") throw new Error("완료 주문은 출력 대기로 되돌린 후 수정하세요.");
+  const instagramId = canonicalInstagramId(draftInstagramId || order.instagramId);
+  if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
   const normalized = normalizedDelivery(delivery);
-  const edited = { ...order, delivery: normalized, extractionWarnings: [], registrationConfirmed: true,
-    conflict: order.conflict && !sameDelivery(order.conflict.previous, normalized) ? { ...order.conflict, incoming: normalized } : null };
+  const customer = customerFor(state, instagramId);
+  const idChanged = !sameId(order.instagramId, instagramId);
+  const conflict = idChanged
+    ? customer && !sameDelivery(customer.delivery, normalized) ? { previous: { ...customer.delivery }, incoming: normalized, customerId: customer.id } : null
+    : order.conflict && !sameDelivery(order.conflict.previous, normalized) ? { ...order.conflict, incoming: normalized } : null;
+  const edited = { ...order, instagramId, delivery: normalized, extractionWarnings: [], registrationConfirmed: true, conflict };
   const refreshed = refreshStatus(broadcast, edited);
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? refreshed : o) });
-  return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, order.instagramId, normalized) } : next;
+  return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, normalized) } : next;
 }
 
 export function resolveConflict(state: DashboardState, broadcastId: string, orderId: string, choice: "previous" | "incoming") {
@@ -234,10 +239,15 @@ export function exportReadyOrders(state: DashboardState, broadcastId: string, de
   return replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((order) => exportedIds.has(order.id) ? { ...order, status: "COMPLETED" } : order) });
 }
 
-export function editCustomer(state: DashboardState, customerId: string, delivery: Delivery) {
+export function editCustomer(state: DashboardState, customerId: string, delivery: Delivery, draftInstagramId = "") {
   const normalized = normalizedDelivery(delivery);
   if (deliveryIssues(normalized).length) throw new Error("성명, 주소와 010 형식의 연락처를 입력하세요.");
-  return { ...state, customers: state.customers.map((c) => c.id === customerId ? { ...c, delivery: normalized, updatedAt: now() } : c) };
+  const customer = state.customers.find((item) => item.id === customerId);
+  if (!customer) throw new Error("고객 정보를 찾을 수 없습니다.");
+  const instagramId = canonicalInstagramId(draftInstagramId || customer.instagramId);
+  if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
+  if (state.customers.some((item) => item.id !== customerId && sameId(item.instagramId, instagramId))) throw new Error("이미 저장된 인스타그램 아이디입니다.");
+  return { ...state, customers: state.customers.map((item) => item.id === customerId ? { ...item, instagramId, delivery: normalized, updatedAt: now() } : item) };
 }
 
 export function deleteCustomer(state: DashboardState, customerId: string) {
