@@ -6,10 +6,15 @@ type StoragePort = Pick<Storage, "getItem" | "setItem">;
 const record = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v));
 const strings = (v: unknown, keys: string[]) => record(v) && keys.every((k) => typeof v[k] === "string");
 const delivery = (v: unknown): v is Delivery => strings(v, ["name", "address", "phone"]);
+const customerState = (v: unknown) => record(v)
+  && (v.lastOrderedAt === undefined || typeof v.lastOrderedAt === "string")
+  && (v.blocked === undefined || typeof v.blocked === "boolean")
+  && (v.legacyCheckCount === undefined || (typeof v.legacyCheckCount === "number" && Number.isInteger(v.legacyCheckCount) && v.legacyCheckCount >= 0))
+  && (v.checkHistory === undefined || (Array.isArray(v.checkHistory) && v.checkHistory.every((item: unknown) => record(item) && strings(item, ["id", "note"]) && (item.date === null || typeof item.date === "string"))));
 
 export function isDashboardState(value: unknown): value is DashboardState {
   if (!record(value) || value.version !== 2 || !Array.isArray(value.broadcasts) || !Array.isArray(value.customers)) return false;
-  return value.customers.every((c) => strings(c, ["id", "instagramId", "updatedAt"]) && delivery(c.delivery)) && value.broadcasts.every((b) => {
+  return value.customers.every((c) => strings(c, ["id", "instagramId", "updatedAt"]) && delivery(c.delivery) && customerState(c)) && value.broadcasts.every((b) => {
     if (!strings(b, ["id", "title", "memo", "memoDraft", "orderDraft", "createdAt", "updatedAt"]) || !Array.isArray(b.settlements) || !Array.isArray(b.orders) || !Array.isArray(b.settlementErrors)) return false;
     return b.settlements.every((s: unknown) => record(s) && strings(s, ["id", "instagramId"]) && typeof s.total === "number" && Number.isFinite(s.total) && typeof s.quantity === "number" && Array.isArray(s.items) && s.items.every((i: unknown) => typeof i === "string"))
       && b.settlementErrors.every((e: unknown) => record(e) && strings(e, ["text", "message"]) && typeof e.line === "number")

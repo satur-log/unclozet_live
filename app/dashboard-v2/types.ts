@@ -1,10 +1,15 @@
 export type OrderStatus = "WAITING" | "READY" | "COMPLETED";
 export type Delivery = { name: string; address: string; phone: string };
+export type CustomerCheck = { id: string; date: string | null; note: string };
 export type Customer = {
   id: string;
   instagramId: string;
   delivery: Delivery;
   updatedAt: string;
+  lastOrderedAt?: string;
+  blocked?: boolean;
+  legacyCheckCount?: number;
+  checkHistory?: CustomerCheck[];
 };
 export type Settlement = {
   id: string;
@@ -39,3 +44,5 @@ export type Broadcast = {
 };
 export type DashboardState = { version: 2; broadcasts: Broadcast[]; customers: Customer[] };
 export type Issue = { code: string; message: string };
+export type CustomerImportRecord = { instagramId: string; delivery: Delivery; row: number };
+export type CustomerImportSummary = { created: number; updated: number; unchanged: number; total: number };

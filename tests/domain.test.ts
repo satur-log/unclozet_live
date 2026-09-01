@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import readXlsxFile from "read-excel-file/node";
 import { analyzeSettlement } from "../app/dashboard-v2/settlement";
 import { normalizePhoneNumber, parseKakaoOrder } from "../app/dashboard-v2/shipping-parser";
+import { parseCustomerWorkbookRows } from "../app/dashboard-v2/customer-import";
+import { createShippingWorkbook } from "../app/dashboard-v2/workbook";
 import {
-  addBroadcast, confirmPreviousInfo, deleteBroadcast, deleteCustomer, editCustomer, editOrder, exportReadyOrders, registerOrder,
-  resolveConflict, restoreOrder, saveSettlement,
+  addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
+  deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
+  saveSettlement, setCustomerBlocked,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
 import { isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
@@ -141,6 +145,81 @@ test("customer information and Instagram ID can be edited and are normalized", (
   assert.deepEqual(state.customers[0].delivery, { name: "수정 고객", address: "서울시 수정구 수정로 2", phone: "010-9999-8888" });
   assert.equal(state.customers[0].instagramId, "updated.case");
   assert.throws(() => editCustomer(state, customer.id, { name: "", address: "", phone: "123" }), /성명, 주소/);
+});
+
+test("shipping workbook rows import new customers and update matching IDs", () => {
+  const records = parseCustomerWorkbookRows([
+    [],
+    ["받는분성명", "받는분 주소", "우편번호", "전화번호", "기타 연락처", "배송메세지", "품목명"],
+    ["신규 고객", "서울시 신규구 1", "", "01011112222", "", "", "@new.case"],
+    ["기존 고객 수정", "서울시 수정구 2", "", "", "01033334444", "", "same.case"],
+  ]);
+  let state = emptyState();
+  state.customers = [{ id: "same", instagramId: "SAME.CASE", delivery: info(), updatedAt: "2026-01-01T00:00:00.000Z" }];
+  const imported = importCustomers(state, records);
+  assert.deepEqual(imported.summary, { created: 1, updated: 1, unchanged: 0, total: 2 });
+  assert.equal(imported.state.customers.length, 2);
+  assert.deepEqual(imported.state.customers.find((customer) => customer.id === "same")?.delivery, { name: "기존 고객 수정", address: "서울시 수정구 2", phone: "010-3333-4444" });
+  assert.ok(imported.state.customers.some((customer) => customer.instagramId === "new.case"));
+});
+
+test("customer workbook import rejects missing fields and conflicting duplicate IDs", () => {
+  assert.throws(() => parseCustomerWorkbookRows([["품목명", "받는분성명", "받는분 주소", "전화번호"], ["bad.case", "", "서울시", "01012345678"]]), /2행의 받는분 성명/);
+  assert.throws(() => parseCustomerWorkbookRows([
+    ["품목명", "받는분성명", "받는분 주소", "전화번호"],
+    ["same.case", "고객", "서울시 1", "01012345678"],
+    ["same.case", "고객", "서울시 2", "01012345678"],
+  ]), /같은 인스타그램 ID/);
+});
+
+test("customer checks, blocking, and recent order time stay separate from order status", () => {
+  let { state, broadcastId } = setup(["status.case"]);
+  state.broadcasts[0].createdAt = "2026-08-28T20:14:00.000Z";
+  state = registerOrder(state, broadcastId, `인스타 아이디: status.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const customer = state.customers[0];
+  customer.legacyCheckCount = 2;
+  assert.equal(customerCheckCount(customer), 2);
+  assert.equal(customerStatusLabel(customer), "체크 2회");
+  assert.equal(customerLastOrderedAt(state, customer), "2026-08-28T20:14:00.000Z");
+  const orderStatus = state.broadcasts[0].orders[0].status;
+
+  state = addCustomerCheck(state, customer.id, "2026-09-01", "연락 없이 미입금");
+  const check = state.customers[0].checkHistory![0];
+  assert.equal(customerStatusLabel(state.customers[0]), "체크 3회");
+  state = editCustomerCheck(state, customer.id, check.id, "2026-09-02", "메모 수정");
+  assert.deepEqual(state.customers[0].checkHistory![0], { id: check.id, date: "2026-09-02", note: "메모 수정" });
+  state = setCustomerBlocked(state, customer.id, true);
+  assert.equal(customerStatusLabel(state.customers[0]), "차단");
+  assert.equal(state.broadcasts[0].orders[0].status, orderStatus);
+  state = setCustomerBlocked(state, customer.id, false);
+  assert.equal(customerStatusLabel(state.customers[0]), "체크 3회");
+  state = deleteCustomerCheck(state, customer.id, check.id);
+  assert.equal(customerStatusLabel(state.customers[0]), "체크 2회");
+});
+
+test("customer order history accumulates matching broadcast orders newest first", () => {
+  let state = emptyState();
+  const older = addBroadcast(state, "8월 방송"); state = older.state; state.broadcasts[0].createdAt = "2026-08-20T12:00:00.000Z";
+  state = saveSettlement(state, older.broadcastId, "history.case - 1번 1.5");
+  state = registerOrder(state, older.broadcastId, `인스타 아이디: history.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const newer = addBroadcast(state, "9월 방송"); state = newer.state; state.broadcasts[0].createdAt = "2026-09-01T12:00:00.000Z";
+  state = saveSettlement(state, newer.broadcastId, "history.case - 2번 2.5");
+  state = registerOrder(state, newer.broadcastId, `인스타 아이디: history.case\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const customer = state.customers.find((item) => item.instagramId === "history.case")!;
+  const history = customerOrderHistory(state, customer);
+  assert.equal(history.length, 2);
+  assert.deepEqual(history.map((item) => item.broadcastTitle), ["9월 방송", "8월 방송"]);
+  assert.deepEqual(history.map((item) => [item.quantity, item.total]), [[1, 25_000], [1, 15_000]]);
+});
+
+test("the exported XLSX can be read back into customer records", async () => {
+  const bytes = createShippingWorkbook(
+    ["받는분성명", "받는분 주소", "우편번호", "전화번호", "기타 연락처", "배송메세지", "품목명"],
+    [["왕복 고객", "서울시 왕복구 3", "", "010-5555-6666", "010-5555-6666", "", "round.trip"]],
+  );
+  const sheets = await readXlsxFile(Buffer.from(bytes));
+  const records = parseCustomerWorkbookRows(sheets[0].data);
+  assert.deepEqual(records, [{ instagramId: "round.trip", delivery: { name: "왕복 고객", address: "서울시 왕복구 3", phone: "010-5555-6666" }, row: 3 }]);
 });
 
 test("broadcast deletion removes only the selected broadcast", () => {

@@ -2,14 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import readXlsxFile from "read-excel-file/browser";
 import {
-  addBroadcast, confirmPreviousInfo, deleteBroadcast, deleteCustomer, deliveryIssues, editCustomer, editOrder, exportReadyOrders,
-  matchOrder, matchingCandidates, orderIssues, registerOrder, renameBroadcast, resolveConflict, restoreOrder,
-  saveDraft, saveSettlement, statusLabels,
+  addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
+  deleteCustomerCheck, deliveryIssues, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, matchOrder,
+  matchingCandidates, orderIssues, registerOrder, renameBroadcast, resolveConflict, restoreOrder, saveDraft, saveSettlement,
+  setCustomerBlocked, statusLabels, summarizeCustomerImport,
 } from "./model";
+import { parseCustomerWorkbookRows } from "./customer-import";
 import { analyzeSettlement } from "./settlement";
-import type { Broadcast, Customer, Delivery, Order, OrderStatus } from "./types";
+import type { Broadcast, Customer, CustomerCheck, CustomerImportRecord, CustomerImportSummary, Delivery, Order, OrderStatus } from "./types";
 import { useDashboard } from "./provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,10 +23,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { ChevronRight, Copy, Download, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
 
 const won = (value: number) => new Intl.NumberFormat("ko-KR", { style: "currency", currency: "KRW", maximumFractionDigits: 0 }).format(value);
 const displayDate = (value: string) => new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+const displayOrderDate = (value: string | null) => {
+  if (!value) return "주문 이력 없음";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(value)).map((part) => [part.type, part.value]));
+  return `${parts.year}.${parts.month}.${parts.day} ${parts.hour}:${parts.minute}`;
+};
+const today = () => new Date().toLocaleDateString("en-CA");
 const broadcastTitle = (value: string) => {
   const date = new Date(value);
   const weekday = ["일", "월", "화", "수", "목", "금", "토"][date.getDay()];
@@ -180,17 +189,65 @@ function BroadcastDetail({ broadcastId }: { broadcastId: string }) {
   </Shell>;
 }
 
-function CustomerDrawer({ customer, close }: { customer: Customer; close: () => void }) {
-  const { commit } = useDashboard(); const [delivery, setDelivery] = useState(customer.delivery); const [instagramId, setInstagramId] = useState(customer.instagramId); const [confirming, setConfirming] = useState(false);
-  useEffect(() => { setDelivery(customer.delivery); setInstagramId(customer.instagramId); setConfirming(false); }, [customer.id, customer.delivery, customer.instagramId]);
-  return <Sheet open onOpenChange={(open) => { if (!open) close(); }}><SheetContent className="w-full overflow-y-auto p-7 sm:max-w-lg" showCloseButton><SheetHeader className="v2-drawer-header"><p className="v2-eyebrow">고객 정보</p><SheetTitle>{customer.instagramId}</SheetTitle><SheetDescription>최근 수정 {displayDate(customer.updatedAt)}</SheetDescription></SheetHeader><section className="v2-drawer-section"><h3>저장된 고객정보</h3><div className="v2-form-grid"><label>인스타그램 아이디<Input value={instagramId} onChange={(e) => setInstagramId(e.target.value)} placeholder="instagram_id" /></label><label>받는분 성명<Input value={delivery.name} onChange={(e) => setDelivery({ ...delivery, name: e.target.value })} /></label><label className="full">주소<Input value={delivery.address} onChange={(e) => setDelivery({ ...delivery, address: e.target.value })} /></label><label>연락처<Input value={delivery.phone} onChange={(e) => setDelivery({ ...delivery, phone: e.target.value })} /></label></div><Button className="v2-action-wide" onClick={() => commit((current) => editCustomer(current, customer.id, delivery, instagramId), "고객정보를 수정했습니다.")}>고객정보 저장</Button></section><section className="v2-danger-zone"><h3>고객 저장정보 삭제</h3><p>과거 방송의 주문과 상태는 삭제되지 않습니다.</p>{confirming ? <div><Button variant="outline" onClick={() => setConfirming(false)}>취소</Button><Button variant="destructive" onClick={() => { if (commit((current) => deleteCustomer(current, customer.id), "고객 저장정보를 삭제했습니다.")) close(); }}>삭제 확정</Button></div> : <Button variant="link" className="v2-text-danger" onClick={() => setConfirming(true)}>삭제</Button>}</section></SheetContent></Sheet>;
+function CustomerStatusBadge({ customer }: { customer: Customer }) {
+  const count = customerCheckCount(customer);
+  return <Badge variant={customer.blocked ? "destructive" : count ? "secondary" : "outline"}>{customerStatusLabel(customer)}</Badge>;
+}
+
+function CustomerDrawer({ customer, lastOrderedAt, close }: { customer: Customer; lastOrderedAt: string | null; close: () => void }) {
+  const { state, commit } = useDashboard();
+  const [delivery, setDelivery] = useState(customer.delivery); const [instagramId, setInstagramId] = useState(customer.instagramId);
+  const [confirming, setConfirming] = useState(false); const [deletingCheckId, setDeletingCheckId] = useState<string | null>(null);
+  const [checkDraft, setCheckDraft] = useState<{ id: string | null; date: string; note: string } | null>(null);
+  useEffect(() => { setDelivery(customer.delivery); setInstagramId(customer.instagramId); setConfirming(false); setDeletingCheckId(null); setCheckDraft(null); }, [customer.id, customer.delivery, customer.instagramId]);
+  const checks = [...(customer.checkHistory ?? [])].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+  const orderHistory = customerOrderHistory(state, customer);
+  function editCheck(check?: CustomerCheck) { setCheckDraft({ id: check?.id ?? null, date: check?.date ?? today(), note: check?.note ?? "" }); }
+  function saveCheck() {
+    if (!checkDraft) return;
+    const saved = commit((current) => checkDraft.id
+      ? editCustomerCheck(current, customer.id, checkDraft.id, checkDraft.date, checkDraft.note)
+      : addCustomerCheck(current, customer.id, checkDraft.date, checkDraft.note), checkDraft.id ? "체크 이력을 수정했습니다." : "체크 이력을 추가했습니다.");
+    if (saved) setCheckDraft(null);
+  }
+  return <Sheet open onOpenChange={(open) => { if (!open) close(); }}><SheetContent className="w-full overflow-y-auto p-7 sm:max-w-lg" showCloseButton>
+    <SheetHeader className="v2-drawer-header"><p className="v2-eyebrow">고객 정보</p><SheetTitle>{customer.instagramId}</SheetTitle><SheetDescription>최근 주문 {displayOrderDate(lastOrderedAt)}</SheetDescription></SheetHeader>
+    <section className="v2-drawer-section"><h3>배송 정보</h3><div className="v2-form-grid"><label>인스타그램 아이디<Input value={instagramId} onChange={(e) => setInstagramId(e.target.value)} placeholder="instagram_id" /></label><label>수령인<Input value={delivery.name} onChange={(e) => setDelivery({ ...delivery, name: e.target.value })} /></label><label>연락처<Input value={delivery.phone} onChange={(e) => setDelivery({ ...delivery, phone: e.target.value })} /></label><label className="full">주소<Input value={delivery.address} onChange={(e) => setDelivery({ ...delivery, address: e.target.value })} /></label></div><Button className="v2-action-wide" onClick={() => commit((current) => editCustomer(current, customer.id, delivery, instagramId), "배송 정보를 수정했습니다.")}>배송 정보 저장</Button></section>
+    <section className="v2-drawer-section"><div className="v2-order-history-head"><div><h3>주문 내역</h3><p>참여한 방송 주문을 최신순으로 표시합니다.</p></div><Badge variant="outline">총 {orderHistory.length}건</Badge></div><div className="v2-order-history-list">{orderHistory.map((history) => <article className="v2-order-history-item" key={history.id}><div className="v2-order-history-top"><div><strong>{history.broadcastTitle}</strong><span>{displayOrderDate(history.orderedAt)}</span></div><StatusBadge status={history.status} /></div><div className="v2-order-history-summary"><span>정산금액 <b>{history.total == null ? "—" : won(history.total)}</b></span><span>총 갯수 <b>{history.quantity == null ? "—" : `${history.quantity}개`}</b></span></div>{history.items.length ? <p>{history.items.join(" · ")}</p> : null}</article>)}{!orderHistory.length ? <div className="v2-order-history-empty">누적된 주문 내역이 없습니다.</div> : null}</div></section>
+    <section className="v2-drawer-section"><div className="v2-customer-state-head"><div><h3>고객 상태</h3><p>주문 상태와 별도로 관리됩니다.</p></div><CustomerStatusBadge customer={customer} /></div><div className="v2-customer-state-action"><span>누적 체크 {customerCheckCount(customer)}회</span><Button variant={customer.blocked ? "outline" : "destructive"} size="sm" onClick={() => commit((current) => setCustomerBlocked(current, customer.id, !customer.blocked), customer.blocked ? "고객 차단을 해제했습니다." : "고객을 차단했습니다.")}>{customer.blocked ? "차단 해제" : "차단하기"}</Button></div></section>
+    <section className="v2-drawer-section"><div className="v2-check-head"><div><h3>체크 이력</h3><p>기존 누적과 새 체크를 함께 계산합니다.</p></div><Button variant="outline" size="sm" onClick={() => editCheck()}><Plus data-icon="inline-start" />체크 추가</Button></div><div className="v2-check-list">{(customer.legacyCheckCount ?? 0) > 0 ? <article className="v2-check-item legacy"><div><strong>기존 누적 {customer.legacyCheckCount}회</strong><span>일자 미상</span></div><p>발생일을 알 수 없는 기존 체크입니다.</p></article> : null}{checks.map((check) => <article className="v2-check-item" key={check.id}><div><strong>{check.date ?? "일자 미상"}</strong><div className="v2-check-actions">{deletingCheckId === check.id ? <><Button variant="ghost" size="sm" onClick={() => setDeletingCheckId(null)}>취소</Button><Button variant="destructive" size="sm" onClick={() => { if (commit((current) => deleteCustomerCheck(current, customer.id, check.id), "체크 이력을 삭제했습니다.")) setDeletingCheckId(null); }}>삭제 확정</Button></> : <><Button variant="ghost" size="icon-sm" aria-label="체크 이력 수정" onClick={() => editCheck(check)}><Pencil /></Button><Button variant="ghost" size="icon-sm" aria-label="체크 이력 삭제" onClick={() => setDeletingCheckId(check.id)}><Trash2 /></Button></>}</div></div><p>{check.note || "메모 없음"}</p></article>)}{!checks.length && !(customer.legacyCheckCount ?? 0) ? <div className="v2-check-empty">등록된 체크 이력이 없습니다.</div> : null}</div></section>
+    <section className="v2-danger-zone"><h3>고객 저장정보 삭제</h3><p>과거 방송의 주문과 상태는 삭제되지 않습니다.</p>{confirming ? <div><Button variant="outline" onClick={() => setConfirming(false)}>취소</Button><Button variant="destructive" onClick={() => { if (commit((current) => deleteCustomer(current, customer.id), "고객 저장정보를 삭제했습니다.")) close(); }}>삭제 확정</Button></div> : <Button variant="link" className="v2-text-danger" onClick={() => setConfirming(true)}>삭제</Button>}</section>
+    <Dialog open={Boolean(checkDraft)} onOpenChange={(open) => { if (!open) setCheckDraft(null); }}><DialogContent><DialogHeader><DialogTitle>{checkDraft?.id ? "체크 이력 수정" : "체크 추가"}</DialogTitle><DialogDescription>체크 날짜와 운영 메모를 기록합니다.</DialogDescription></DialogHeader>{checkDraft ? <div className="v2-check-form"><label>체크 날짜<Input type="date" value={checkDraft.date} onChange={(event) => setCheckDraft({ ...checkDraft, date: event.target.value })} /></label><label>메모 <span>선택</span><Textarea value={checkDraft.note} onChange={(event) => setCheckDraft({ ...checkDraft, note: event.target.value })} placeholder="예: 연락 없이 미입금" /></label></div> : null}<DialogFooter><Button variant="outline" onClick={() => setCheckDraft(null)}>취소</Button><Button onClick={saveCheck}>{checkDraft?.id ? "수정 저장" : "체크 추가"}</Button></DialogFooter></DialogContent></Dialog>
+  </SheetContent></Sheet>;
 }
 
 function Customers() {
-  const { state } = useDashboard(); const [query, setQuery] = useState(""); const [selected, setSelected] = useState<string | null>(null);
-  const customers = useMemo(() => [...state.customers].filter((c) => !query.trim() || c.instagramId.toLowerCase().includes(query.toLowerCase()) || c.delivery.name.includes(query)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [query, state.customers]);
+  const { state, commit, notify } = useDashboard(); const [query, setQuery] = useState(""); const [selected, setSelected] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null); const [reading, setReading] = useState(false);
+  const [importDraft, setImportDraft] = useState<{ fileName: string; records: CustomerImportRecord[]; summary: CustomerImportSummary } | null>(null);
+  const customers = useMemo(() => state.customers.map((customer) => ({ customer, lastOrderedAt: customerLastOrderedAt(state, customer) }))
+    .filter(({ customer }) => !query.trim() || customer.instagramId.toLowerCase().includes(query.toLowerCase()) || customer.delivery.name.includes(query))
+    .sort((a, b) => (b.lastOrderedAt ?? "").localeCompare(a.lastOrderedAt ?? "") || a.customer.instagramId.localeCompare(b.customer.instagramId)), [query, state]);
   const customer = state.customers.find((c) => c.id === selected);
-  return <Shell section="customers"><header className="v2-page-head customers"><div><h1>고객 관리</h1><p>고객별 배송 정보를 확인하고 관리합니다.</p></div><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="인스타그램 ID 또는 성명 검색" /></header><section className="v2-customer-list">{customers.length ? <div className="v2-table-wrap"><Table><TableHeader><TableRow><TableHead>인스타그램 ID</TableHead><TableHead>받는분 성명</TableHead><TableHead>연락처</TableHead><TableHead>주소</TableHead><TableHead>최근 수정</TableHead><TableHead /></TableRow></TableHeader><TableBody>{customers.map((c) => <TableRow key={c.id} onClick={() => setSelected(c.id)}><TableCell><strong>{c.instagramId}</strong></TableCell><TableCell>{c.delivery.name}</TableCell><TableCell>{c.delivery.phone}</TableCell><TableCell className="v2-address">{c.delivery.address}</TableCell><TableCell>{displayDate(c.updatedAt)}</TableCell><TableCell><Button variant="ghost" size="icon-sm" aria-label={`${c.instagramId} 상세 열기`}>›</Button></TableCell></TableRow>)}</TableBody></Table></div> : <div className="v2-empty-panel"><strong>{query ? "조건에 맞는 고객이 없습니다." : "저장된 고객 정보가 없습니다."}</strong><p>{query ? "다른 검색어로 다시 확인해 보세요." : "주문서를 등록하면 고객 배송정보가 자동으로 저장됩니다."}</p></div>}</section>{customer ? <CustomerDrawer customer={customer} close={() => setSelected(null)} /> : null}</Shell>;
+  const selectedLastOrderedAt = customer ? customerLastOrderedAt(state, customer) : null;
+  async function selectWorkbook(file: File) {
+    if (file.size > 10 * 1024 * 1024) { notify("10MB 이하의 엑셀 파일을 선택하세요.", true); return; }
+    setReading(true);
+    try {
+      const sheets = await readXlsxFile(file);
+      const sheet = sheets.find((item) => item.sheet === "배송주문") ?? sheets[0];
+      if (!sheet) throw new Error("엑셀 파일에 읽을 수 있는 시트가 없습니다.");
+      const records = parseCustomerWorkbookRows(sheet.data);
+      setImportDraft({ fileName: file.name, records, summary: summarizeCustomerImport(state, records) });
+    } catch (error) { notify(error instanceof Error ? error.message : "엑셀 파일을 읽지 못했습니다.", true); }
+    finally { setReading(false); if (inputRef.current) inputRef.current.value = ""; }
+  }
+  function confirmImport() {
+    if (!importDraft) return;
+    const { created, updated, unchanged } = importDraft.summary;
+    if (commit((current) => importCustomers(current, importDraft.records).state, `고객정보를 가져왔습니다. 신규 ${created}명 · 수정 ${updated}명 · 동일 ${unchanged}명`)) setImportDraft(null);
+  }
+  return <Shell section="customers"><header className="v2-page-head customers"><div><h1>고객 관리</h1><p>고객별 배송 정보를 확인하고 관리합니다.</p></div><div className="v2-customer-actions"><Input ref={inputRef} className="sr-only" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void selectWorkbook(file); }} /><Button variant="outline" disabled={reading} onClick={() => inputRef.current?.click()}><Upload data-icon="inline-start" />{reading ? "읽는 중…" : "엑셀 업로드"}</Button><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="인스타그램 ID 또는 이름 검색" aria-label="고객 검색" /></div></header><section className="v2-customer-list">{customers.length ? <div className="v2-table-wrap"><Table><TableHeader><TableRow><TableHead>인스타그램 아이디</TableHead><TableHead>이름</TableHead><TableHead>연락처</TableHead><TableHead>주소</TableHead><TableHead>상태</TableHead><TableHead>최근 주문 일시</TableHead><TableHead><span className="sr-only">상세</span></TableHead></TableRow></TableHeader><TableBody>{customers.map(({ customer: item, lastOrderedAt }) => <TableRow key={item.id} onClick={() => setSelected(item.id)}><TableCell><strong>{item.instagramId}</strong></TableCell><TableCell>{item.delivery.name}</TableCell><TableCell>{item.delivery.phone}</TableCell><TableCell className="v2-address">{item.delivery.address}</TableCell><TableCell><CustomerStatusBadge customer={item} /></TableCell><TableCell>{displayOrderDate(lastOrderedAt)}</TableCell><TableCell><Button variant="ghost" size="icon-sm" aria-label={`${item.instagramId} 상세 열기`}><ChevronRight /></Button></TableCell></TableRow>)}</TableBody></Table></div> : <div className="v2-empty-panel"><strong>{query ? "조건에 맞는 고객이 없습니다." : "저장된 고객 정보가 없습니다."}</strong><p>{query ? "다른 검색어로 다시 확인해 보세요." : "주문서를 등록하거나 기존 양식의 엑셀을 업로드해 고객정보를 저장하세요."}</p>{!query ? <Button variant="outline" onClick={() => inputRef.current?.click()}><Upload data-icon="inline-start" />엑셀 업로드</Button> : null}</div>}</section>{customer ? <CustomerDrawer customer={customer} lastOrderedAt={selectedLastOrderedAt} close={() => setSelected(null)} /> : null}<Dialog open={Boolean(importDraft)} onOpenChange={(open) => { if (!open) setImportDraft(null); }}><DialogContent><DialogHeader><DialogTitle>고객정보를 가져올까요?</DialogTitle><DialogDescription>{importDraft?.fileName}에서 확인한 고객정보입니다.</DialogDescription></DialogHeader>{importDraft ? <><div className="v2-import-summary"><span>전체 <b>{importDraft.summary.total}명</b></span><span>신규 <b>{importDraft.summary.created}명</b></span><span>수정 <b>{importDraft.summary.updated}명</b></span><span>동일 <b>{importDraft.summary.unchanged}명</b></span></div><Alert><AlertDescription>기존 ID와 정보가 다르면 고객관리의 저장정보를 엑셀 값으로 수정합니다. 과거 방송 주문은 변경하지 않습니다.</AlertDescription></Alert></> : null}<DialogFooter><Button variant="outline" onClick={() => setImportDraft(null)}>취소</Button><Button onClick={confirmImport}>고객정보 가져오기</Button></DialogFooter></DialogContent></Dialog></Shell>;
 }
 
 export default function Dashboard() {

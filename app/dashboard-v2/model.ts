@@ -1,7 +1,7 @@
 import { analyzeSettlement, itemLabel } from "./settlement";
 import { canonicalInstagramId, normalizePhoneNumber, parseKakaoOrder } from "./shipping-parser";
 import { createShippingWorkbook } from "./workbook";
-import type { Broadcast, Customer, DashboardState, Delivery, Issue, Order } from "./types";
+import type { Broadcast, Customer, CustomerCheck, CustomerImportRecord, CustomerImportSummary, DashboardState, Delivery, Issue, Order } from "./types";
 
 export const statusLabels = { WAITING: "입금 전", READY: "출력 대기", COMPLETED: "출력 완료" };
 export const emptyDelivery = (): Delivery => ({ name: "", address: "", phone: "" });
@@ -49,10 +49,10 @@ export function customerFor(state: DashboardState, instagramId: string) {
   return state.customers.find((customer) => sameId(customer.instagramId, instagramId));
 }
 
-function updateCustomer(state: DashboardState, instagramId: string, delivery: Delivery): Customer[] {
+function updateCustomer(state: DashboardState, instagramId: string, delivery: Delivery, orderedAt?: string): Customer[] {
   const customer = customerFor(state, instagramId);
-  if (customer) return state.customers.map((c) => c.id === customer.id ? { ...c, delivery: { ...delivery }, updatedAt: now() } : c);
-  return [{ id: id(), instagramId, delivery: { ...delivery }, updatedAt: now() }, ...state.customers];
+  if (customer) return state.customers.map((c) => c.id === customer.id ? { ...c, delivery: { ...delivery }, updatedAt: now(), lastOrderedAt: [c.lastOrderedAt, orderedAt].filter((value): value is string => Boolean(value)).sort().at(-1) } : c);
+  return [{ id: id(), instagramId, delivery: { ...delivery }, updatedAt: now(), lastOrderedAt: orderedAt, blocked: false, legacyCheckCount: 0, checkHistory: [] }, ...state.customers];
 }
 
 function replaceBroadcast(state: DashboardState, broadcast: Broadcast): DashboardState {
@@ -137,7 +137,7 @@ export function registerOrder(state: DashboardState, broadcastId: string, text: 
   };
   const nextOrder = refreshStatus(broadcast, order);
   const next = replaceBroadcast(state, { ...broadcast, orders: existing ? broadcast.orders.map((o) => o.id === existing.id ? nextOrder : o) : [...broadcast.orders, nextOrder] });
-  return { state: nextOrder.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, delivery) } : next, orderId: order.id };
+  return { state: nextOrder.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, delivery, broadcast.createdAt) } : next, orderId: order.id };
 }
 
 export function confirmPreviousInfo(state: DashboardState, broadcastId: string, orderId: string) {
@@ -164,7 +164,7 @@ export function editOrder(state: DashboardState, broadcastId: string, orderId: s
   const edited = { ...order, instagramId, delivery: normalized, extractionWarnings: [], registrationConfirmed: true, conflict };
   const refreshed = refreshStatus(broadcast, edited);
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? refreshed : o) });
-  return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, normalized) } : next;
+  return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, normalized, broadcast.createdAt) } : next;
 }
 
 export function resolveConflict(state: DashboardState, broadcastId: string, orderId: string, choice: "previous" | "incoming") {
@@ -175,7 +175,7 @@ export function resolveConflict(state: DashboardState, broadcastId: string, orde
   if (deliveryIssues(delivery).length) throw new Error("선택한 정보에 누락 또는 연락처 오류가 있습니다. 먼저 수정하세요.");
   const nextOrder = refreshStatus(broadcast, { ...order, delivery, conflict: null, registrationConfirmed: true });
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? nextOrder : o) });
-  return { ...next, customers: updateCustomer(next, order.instagramId, delivery) };
+  return { ...next, customers: updateCustomer(next, order.instagramId, delivery, broadcast.createdAt) };
 }
 
 export function matchOrder(state: DashboardState, broadcastId: string, orderId: string, settlementId: string) {
@@ -190,7 +190,7 @@ export function matchOrder(state: DashboardState, broadcastId: string, orderId: 
     conflict: customer && order.delivery && !sameDelivery(customer.delivery, order.delivery) ? { previous: { ...customer.delivery }, incoming: { ...order.delivery }, customerId: customer.id } : null };
   const nextOrder = refreshStatus(broadcast, matched);
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.filter((o) => o.id !== occupied?.id).map((o) => o.id === orderId ? nextOrder : o) });
-  return nextOrder.status === "READY" && nextOrder.delivery ? { ...next, customers: updateCustomer(next, nextOrder.instagramId, nextOrder.delivery) } : next;
+  return nextOrder.status === "READY" && nextOrder.delivery ? { ...next, customers: updateCustomer(next, nextOrder.instagramId, nextOrder.delivery, broadcast.createdAt) } : next;
 }
 
 function distance(a: string, b: string) {
@@ -247,9 +247,111 @@ export function editCustomer(state: DashboardState, customerId: string, delivery
   const instagramId = canonicalInstagramId(draftInstagramId || customer.instagramId);
   if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
   if (state.customers.some((item) => item.id !== customerId && sameId(item.instagramId, instagramId))) throw new Error("이미 저장된 인스타그램 아이디입니다.");
-  return { ...state, customers: state.customers.map((item) => item.id === customerId ? { ...item, instagramId, delivery: normalized, updatedAt: now() } : item) };
+  const lastOrderedAt = customerLastOrderedAt(state, customer);
+  return { ...state, customers: state.customers.map((item) => item.id === customerId ? { ...item, instagramId, delivery: normalized, updatedAt: now(), lastOrderedAt: lastOrderedAt ?? item.lastOrderedAt } : item) };
 }
 
 export function deleteCustomer(state: DashboardState, customerId: string) {
   return { ...state, customers: state.customers.filter((c) => c.id !== customerId) };
+}
+
+export function customerCheckCount(customer: Customer) {
+  return Math.max(0, customer.legacyCheckCount ?? 0) + (customer.checkHistory?.length ?? 0);
+}
+
+export function customerStatusLabel(customer: Customer) {
+  if (customer.blocked) return "차단";
+  const count = customerCheckCount(customer);
+  return count ? `체크 ${count}회` : "활성";
+}
+
+export function customerLastOrderedAt(state: DashboardState, customer: Customer) {
+  let latest: string | null = customer.lastOrderedAt ?? null;
+  for (const broadcast of state.broadcasts) {
+    if (broadcast.orders.some((order) => sameId(order.instagramId, customer.instagramId)) && (!latest || broadcast.createdAt > latest)) latest = broadcast.createdAt;
+  }
+  return latest;
+}
+
+export function customerOrderHistory(state: DashboardState, customer: Customer) {
+  return state.broadcasts.flatMap((broadcast) => broadcast.orders
+    .filter((order) => sameId(order.instagramId, customer.instagramId))
+    .map((order) => {
+      const settlement = broadcast.settlements.find((item) => item.id === order.settlementId);
+      return {
+        id: `${broadcast.id}:${order.id}`,
+        broadcastId: broadcast.id,
+        broadcastTitle: broadcast.title,
+        orderedAt: broadcast.createdAt,
+        status: order.status,
+        total: settlement?.total ?? null,
+        quantity: settlement?.quantity ?? null,
+        items: settlement?.items ?? [],
+      };
+    })).sort((a, b) => b.orderedAt.localeCompare(a.orderedAt));
+}
+
+function updateCustomerRecord(state: DashboardState, customerId: string, update: (customer: Customer) => Customer) {
+  if (!state.customers.some((customer) => customer.id === customerId)) throw new Error("고객 정보를 찾을 수 없습니다.");
+  return { ...state, customers: state.customers.map((customer) => customer.id === customerId ? update(customer) : customer) };
+}
+
+export function setCustomerBlocked(state: DashboardState, customerId: string, blocked: boolean) {
+  return updateCustomerRecord(state, customerId, (customer) => ({ ...customer, blocked, updatedAt: now() }));
+}
+
+function validCheckDate(date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+export function addCustomerCheck(state: DashboardState, customerId: string, date: string, note: string) {
+  if (!validCheckDate(date)) throw new Error("체크 날짜를 확인하세요.");
+  const check: CustomerCheck = { id: id(), date, note: note.trim() };
+  return updateCustomerRecord(state, customerId, (customer) => ({ ...customer, checkHistory: [check, ...(customer.checkHistory ?? [])], updatedAt: now() }));
+}
+
+export function editCustomerCheck(state: DashboardState, customerId: string, checkId: string, date: string, note: string) {
+  if (!validCheckDate(date)) throw new Error("체크 날짜를 확인하세요.");
+  return updateCustomerRecord(state, customerId, (customer) => {
+    if (!(customer.checkHistory ?? []).some((check) => check.id === checkId)) throw new Error("체크 이력을 찾을 수 없습니다.");
+    return { ...customer, checkHistory: (customer.checkHistory ?? []).map((check) => check.id === checkId ? { ...check, date, note: note.trim() } : check), updatedAt: now() };
+  });
+}
+
+export function deleteCustomerCheck(state: DashboardState, customerId: string, checkId: string) {
+  return updateCustomerRecord(state, customerId, (customer) => {
+    if (!(customer.checkHistory ?? []).some((check) => check.id === checkId)) throw new Error("체크 이력을 찾을 수 없습니다.");
+    return { ...customer, checkHistory: (customer.checkHistory ?? []).filter((check) => check.id !== checkId), updatedAt: now() };
+  });
+}
+
+export function summarizeCustomerImport(state: DashboardState, records: CustomerImportRecord[]): CustomerImportSummary {
+  let created = 0; let updated = 0; let unchanged = 0;
+  for (const record of records) {
+    const customer = customerFor(state, record.instagramId);
+    if (!customer) created += 1;
+    else if (sameDelivery(customer.delivery, record.delivery)) unchanged += 1;
+    else updated += 1;
+  }
+  return { created, updated, unchanged, total: records.length };
+}
+
+export function importCustomers(state: DashboardState, records: CustomerImportRecord[]) {
+  const summary = summarizeCustomerImport(state, records);
+  const importedAt = now();
+  const incoming = new Map(records.map((record) => [canonicalInstagramId(record.instagramId), record]));
+  const customers = state.customers.map((customer) => {
+    const key = canonicalInstagramId(customer.instagramId);
+    const record = incoming.get(key);
+    if (!record) return customer;
+    incoming.delete(key);
+    if (sameDelivery(customer.delivery, record.delivery)) return customer;
+    return { ...customer, instagramId: record.instagramId, delivery: normalizedDelivery(record.delivery), updatedAt: importedAt };
+  });
+  for (const record of incoming.values()) {
+    customers.unshift({ id: id(), instagramId: record.instagramId, delivery: normalizedDelivery(record.delivery), updatedAt: importedAt, blocked: false, legacyCheckCount: 0, checkHistory: [] });
+  }
+  return { state: { ...state, customers }, summary };
 }
