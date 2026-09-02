@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createMockState } from "./mock-data";
+import { fetchLegacyData, legacyImportCompleted, markLegacyImportCompleted, mergeLegacyData } from "./legacy-import";
 import { loadMockState, saveMockState } from "./repository";
 import type { DashboardState } from "./types";
 
@@ -27,12 +28,26 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    let cancelled = false;
     try {
       const loaded = loadMockState(window.localStorage);
       stateRef.current = loaded;
       setState(loaded);
+      if (!legacyImportCompleted(window.localStorage)) {
+        fetchLegacyData().then(({ memos, rounds }) => {
+          if (cancelled || !stateRef.current) return;
+          const result = mergeLegacyData(stateRef.current, memos, rounds);
+          saveMockState(window.localStorage, result.state);
+          markLegacyImportCompleted(window.localStorage);
+          stateRef.current = result.state;
+          setState(result.state);
+          notify(`${result.importedBroadcasts}개의 이전 방송 내역을 가져왔습니다.`);
+        }).catch((error) => {
+          if (!cancelled) notify(error instanceof Error ? error.message : "이전 방송 내역을 가져오지 못했습니다.", true);
+        });
+      }
     } catch (error) { setLoadError(error instanceof Error ? error.message : "브라우저 저장소를 읽을 수 없습니다."); }
-    return () => { if (timer.current) clearTimeout(timer.current); };
+    return () => { cancelled = true; if (timer.current) clearTimeout(timer.current); };
   }, []);
 
   const commit: Context["commit"] = (change, message) => {

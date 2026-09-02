@@ -4,6 +4,7 @@ import readXlsxFile from "read-excel-file/node";
 import { analyzeSettlement } from "../app/dashboard-v2/settlement";
 import { normalizePhoneNumber, parseKakaoOrder } from "../app/dashboard-v2/shipping-parser";
 import { parseCustomerWorkbookRows } from "../app/dashboard-v2/customer-import";
+import { mergeLegacyData } from "../app/dashboard-v2/legacy-import";
 import { createShippingWorkbook } from "../app/dashboard-v2/workbook";
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
@@ -236,4 +237,30 @@ test("repository reads and writes only the V2 mock namespace and rejects corrupt
   assert.deepEqual([...values.keys()], [STORAGE_KEY]);
   values.set(STORAGE_KEY, JSON.stringify({ version: 2, broadcasts: "bad", customers: [] }));
   assert.throws(() => loadMockState(storage), /형식/);
+});
+
+test("legacy Supabase broadcasts and shipping rounds migrate once without overwriting local data", () => {
+  const local = emptyState();
+  local.customers.push({ id: "local-customer", instagramId: "same.case", delivery: info("999"), updatedAt: "2026-09-01T00:00:00.000Z" });
+  const memos = [{
+    id: "memo-1", title: "이전 방송", memo: "same.case - 1번 1.5\nwaiting.case - 2번 2.0", paidNicknames: [],
+    createdAt: "2026-08-20T12:00:00.000Z", updatedAt: "2026-08-20T13:00:00.000Z",
+  }];
+  const shippingInfo = { name: "이전 고객", address: "서울시 이전구 1", zipCode: "", phone1: "01011112222", phone2: "", memo: "", items: "" };
+  const rounds = [{
+    id: "memo-memo-1", createdAt: memos[0].createdAt, updatedAt: memos[0].updatedAt,
+    participants: [
+      { instagramId: "same.case", status: "READY" as const, shippingInfo },
+      { instagramId: "waiting.case", status: "WAITING" as const, shippingInfo: null },
+    ],
+  }];
+  const first = mergeLegacyData(local, memos, rounds);
+  assert.equal(first.importedBroadcasts, 1);
+  assert.equal(first.state.broadcasts.length, 1);
+  assert.equal(first.state.broadcasts[0].settlements.length, 2);
+  assert.deepEqual(first.state.broadcasts[0].orders.map((order) => order.status), ["READY", "WAITING"]);
+  assert.match(first.state.customers.find((customer) => customer.id === "local-customer")!.delivery.address, /999호/);
+  const second = mergeLegacyData(first.state, memos, rounds);
+  assert.equal(second.importedBroadcasts, 0);
+  assert.equal(second.state.broadcasts.length, 1);
 });
