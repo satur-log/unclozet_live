@@ -173,6 +173,28 @@ test("customer workbook import rejects missing fields and conflicting duplicate 
   ]), /같은 인스타그램 ID/);
 });
 
+test("courier invoice workbook imports recipient columns U through Z from the first row", () => {
+  const headers = [
+    "No", "", "선택", "접수\n순서", "예약\n구분", "상태", "집화예정일자", "운송장번호", "집화예정점소", "보내는분",
+    "보내는분전화번호", "운임\n구분", "박스\n타입", "수량", "내품수량", "기본운임", "기타운임", "운임합계", "고객주문번호", "배송계획점소",
+    "받는분", "받는분전화번호", "받는분우편번호", "받는분주소", "상품코드", "상품명", "단품코드", "단품명", "배송메시지", "기타1",
+    "기타2", "기타3", "기타4", "기타5", "기타6", "기타7", "기타8", "기타9", "기타10", "휴일배송",
+  ];
+  const row: unknown[] = Array.from({ length: 40 }, () => "");
+  row[20] = "송장 고객";
+  row[21] = 1012345678;
+  row[22] = "01234";
+  row[23] = "서울시 송장구 배송로 1";
+  row[24] = "상품 코드";
+  row[25] = "@invoice.case";
+  const records = parseCustomerWorkbookRows([headers, row]);
+  assert.deepEqual(records, [{
+    instagramId: "invoice.case",
+    delivery: { name: "송장 고객", address: "서울시 송장구 배송로 1", phone: "010-1234-5678" },
+    row: 2,
+  }]);
+});
+
 test("customer checks, blocking, and recent order time stay separate from order status", () => {
   let { state, broadcastId } = setup(["status.case"]);
   state.broadcasts[0].createdAt = "2026-08-28T20:14:00.000Z";

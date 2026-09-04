@@ -2,10 +2,10 @@ import { canonicalInstagramId, normalizePhoneNumber } from "./shipping-parser";
 import type { CustomerImportRecord, Delivery } from "./types";
 
 const requiredHeaders = {
-  name: ["받는분성명", "받는분 성명"],
+  name: ["받는분성명", "받는분 성명", "받는분"],
   address: ["받는분주소", "받는분 주소"],
-  phone: ["전화번호", "기타연락처", "기타 연락처"],
-  instagramId: ["품목명", "인스타그램ID", "인스타그램아이디"],
+  phone: ["전화번호", "기타연락처", "기타 연락처", "받는분전화번호", "받는분 전화번호"],
+  instagramId: ["품목명", "상품명", "인스타그램ID", "인스타그램아이디"],
 } as const;
 
 const text = (value: unknown) => value == null ? "" : String(value).trim();
@@ -32,7 +32,7 @@ export function parseCustomerWorkbookRows(rows: readonly (readonly unknown[])[])
   const columns = {
     name: findColumn(header, requiredHeaders.name),
     address: findColumn(header, requiredHeaders.address),
-    phone: findColumn(header, ["전화번호"]),
+    phone: findColumn(header, ["전화번호", "받는분전화번호", "받는분 전화번호"]),
     otherPhone: findColumn(header, ["기타연락처", "기타 연락처"]),
     instagramId: findColumn(header, requiredHeaders.instagramId),
   };
