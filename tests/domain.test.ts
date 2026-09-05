@@ -13,6 +13,7 @@ import {
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
 import { isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
+import { mergeDashboardStates } from "../app/dashboard-v2/remote-repository";
 import type { DashboardState, Delivery } from "../app/dashboard-v2/types";
 
 const info = (room = "101"): Delivery => ({ name: "테스트가람", address: `테스트시 가상구 샘플로 0 ${room}호`, phone: "010-1234-5678" });
@@ -285,4 +286,24 @@ test("legacy Supabase broadcasts and shipping rounds migrate once without overwr
   const second = mergeLegacyData(first.state, memos, rounds);
   assert.equal(second.importedBroadcasts, 0);
   assert.equal(second.state.broadcasts.length, 1);
+});
+
+test("remote initialization keeps newer local records and remote-only records", () => {
+  let remote = emptyState();
+  const remoteOnly = addBroadcast(remote, "원격 방송"); remote = remoteOnly.state;
+  remote.broadcasts[0].createdAt = "2026-09-01T00:00:00.000Z";
+  remote.broadcasts[0].updatedAt = "2026-09-01T00:00:00.000Z";
+  remote.customers = [{ id: "remote", instagramId: "same.case", delivery: info("100"), updatedAt: "2026-09-01T00:00:00.000Z", checkHistory: [{ id: "remote-check", date: null, note: "기존" }] }];
+
+  let local = emptyState();
+  const localOnly = addBroadcast(local, "로컬 방송"); local = localOnly.state;
+  local.broadcasts[0].createdAt = "2026-09-02T00:00:00.000Z";
+  local.broadcasts[0].updatedAt = "2026-09-02T00:00:00.000Z";
+  local.customers = [{ id: "local", instagramId: "SAME.CASE", delivery: info("200"), updatedAt: "2026-09-02T00:00:00.000Z", checkHistory: [{ id: "local-check", date: "2026-09-02", note: "신규" }] }];
+
+  const merged = mergeDashboardStates(remote, local);
+  assert.deepEqual(new Set(merged.broadcasts.map((broadcast) => broadcast.title)), new Set(["원격 방송", "로컬 방송"]));
+  assert.equal(merged.customers.length, 1);
+  assert.match(merged.customers[0].delivery.address, /200호/);
+  assert.deepEqual(new Set(merged.customers[0].checkHistory?.map((check) => check.id)), new Set(["remote-check", "local-check"]));
 });

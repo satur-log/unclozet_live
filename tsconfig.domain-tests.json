@@ -22,6 +22,7 @@
     "app/dashboard-v2/model.ts",
     "app/dashboard-v2/mock-data.ts",
     "app/dashboard-v2/repository.ts",
+    "app/dashboard-v2/remote-repository.ts",
     "tests/**/*.test.ts"
   ]
 }
