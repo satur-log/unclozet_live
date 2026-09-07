@@ -91,10 +91,18 @@ function phoneCandidate(value: string) {
   return looseNumberMatch?.[1] ?? "";
 }
 
-function firstInstagramId(value: string) {
-  // Keep numeric-only address/phone fragments out of the fallback, while
-  // accepting digit/underscore-leading IDs containing a letter.
-  return stripFieldNoise(value).match(/(?<![a-z0-9._])@?(?=[a-z0-9._]{0,29}[a-z])[a-z0-9._]{2,30}(?![a-z0-9._])/i)?.[0] ?? "";
+function firstInstagramId(value: string, allowNumericOnly = false) {
+  const candidates = Array.from(stripFieldNoise(value).matchAll(/(?<![a-z0-9._])@?([a-z0-9._]{2,30})(?![a-z0-9._])/gi));
+  for (const candidate of candidates) {
+    const id = candidate[0];
+    const normalized = id.replace(/^@/, "");
+    // IDs such as 2211221_ contain no letters but are unambiguously IDs due
+    // to their underscore or dot. A fully numeric ID is accepted only where
+    // the sender explicitly labeled the field, and never when it is a phone.
+    if (/[a-z._]/i.test(normalized)) return id;
+    if (allowNumericOnly && !phoneCandidate(normalized)) return id;
+  }
+  return "";
 }
 
 function firstKoreanName(value: string) {
@@ -225,6 +233,8 @@ function findParticipantId(text: string, lines: string[], participantIds: string
   const candidates = [labeledId, lines[0] ?? "", ...lines];
 
   if (participantIds.length === 0) {
+    const labeledNumericId = firstInstagramId(labeledId, true);
+    if (labeledNumericId) return labeledNumericId;
     for (const candidate of candidates) {
       // A free-form order often starts with an ID followed by a comma or a
       // Korean name. Extract the English-containing token itself instead of

@@ -45,11 +45,15 @@ test("non-settlement prose is ignored without adding errors to valid orders", ()
 });
 
 test("order parser accepts dot, consecutive underscore and digit-leading IDs", () => {
-  for (const instagramId of ["case.dot", "case__under", "2.case__under"]) {
+  for (const instagramId of ["case.dot", "case__under", "2.case__under", "2211221_"]) {
     const parsed = parseKakaoOrder(`인스타 아이디: ${instagramId}\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678`, []);
     assert.equal(parsed.instagramId, instagramId);
     assert.equal(parsed.shippingInfo.phone1, "010-1234-5678");
   }
+
+  const numericOnlyLabeled = parseKakaoOrder("인스타 아이디: 2211221\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678", []);
+  assert.equal(numericOnlyLabeled.instagramId, "2211221");
+  assert.equal(parseKakaoOrder("01012345678\n성함: 테스트나래", []).instagramId, "");
 
   const multiLineFreeform = parseKakaoOrder("gwangsoo_m, 이광수\n광주시 동구 필문대로 1\n01077774444", []);
   assert.equal(multiLineFreeform.instagramId, "gwangsoo_m");
