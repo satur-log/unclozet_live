@@ -31,7 +31,9 @@ test("existing settlement parser behavior is retained and invalid residue is rep
   assert.equal(parsed.buyers[1].total, 15_000);
   assert.equal(parsed.errors.length, 1);
   assert.match(parsed.announcement, /case\.dot/);
-  assert.doesNotMatch(parsed.announcement, /배송 안내/);
+  assert.match(parsed.announcement, /배송 안내 문구는 정산에서 제외/);
+  assert.match(parsed.announcement, /case\.dot - 1번 1\.5 \+ 2번 2\.0 = 35,000/);
+  assert.match(parsed.announcement, /broken - 1\.2 \+ 메모확인/);
 });
 
 test("non-settlement prose is ignored without adding errors to valid orders", () => {

@@ -157,6 +157,7 @@ export function settlementInputLine(line: string) {
 export function analyzeSettlement(text: string) {
   const errors: Array<{ line: number; text: string; message: string }> = [];
   const accepted: string[] = [];
+  const totalsByLine = new Map<number, number>();
   text.split(/\r?\n/).forEach((original, index) => {
     if (!original.trim()) return;
     // 정산 형식으로 시작하지 않는 안내문과 메모는 공지 생성 대상에서
@@ -172,6 +173,7 @@ export function analyzeSettlement(text: string) {
       errors.push({ line: index + 1, text: original, message: "아이디 - 금액 형식을 확인하세요. 인식하지 못한 항목이 있습니다." });
     } else {
       accepted.push(line);
+      totalsByLine.set(index, parsed.total);
     }
   });
   const byId = new Map<string, BuyerSummary>();
@@ -180,5 +182,10 @@ export function analyzeSettlement(text: string) {
     const previous = byId.get(key);
     byId.set(key, previous ? { ...previous, quantity: previous.quantity + buyer.quantity, total: previous.total + buyer.total, items: [...previous.items, ...buyer.items] } : buyer);
   }
-  return { buyers: [...byId.values()], errors, announcement: memoWithLineTotals(accepted.join("\n")) };
+  const announcement = text.split(/\r?\n/).map((original, index) => {
+    const total = totalsByLine.get(index);
+    if (total === undefined) return original;
+    return `${settlementInputLine(original).trimEnd()} = ${numberWithComma(total)}`;
+  }).join("\n");
+  return { buyers: [...byId.values()], errors, announcement };
 }
