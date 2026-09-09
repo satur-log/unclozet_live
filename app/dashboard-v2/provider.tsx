@@ -14,7 +14,7 @@ import {
   remoteSavePending,
   saveRemoteDashboardState,
 } from "./remote-repository";
-import { loadMockState, saveMockState } from "./repository";
+import { hasMeaningfulDashboardChange, loadMockState, saveMockState } from "./repository";
 import type { DashboardState } from "./types";
 
 export type SyncStatus = "loading" | "saving" | "synced" | "error" | "local";
@@ -152,7 +152,9 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const commit: Context["commit"] = (change, message) => {
     try {
       if (!stateRef.current) throw new Error("데이터를 불러오는 중입니다.");
-      const next = change(stateRef.current);
+      const previous = stateRef.current;
+      const next = change(previous);
+      if (!hasMeaningfulDashboardChange(previous, next)) return true;
       saveMockState(window.localStorage, next);
       if (hasRemoteDashboardConfig()) markRemoteSavePending(window.localStorage);
       stateRef.current = next;

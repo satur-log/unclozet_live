@@ -12,7 +12,7 @@ import {
   saveSettlement, setCustomerBlocked,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
-import { isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
+import { hasMeaningfulDashboardChange, isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
 import { mergeDashboardStates } from "../app/dashboard-v2/remote-repository";
 import type { DashboardState, Delivery } from "../app/dashboard-v2/types";
 
@@ -266,6 +266,15 @@ test("repository reads and writes only the V2 mock namespace and rejects corrupt
   assert.deepEqual([...values.keys()], [STORAGE_KEY]);
   values.set(STORAGE_KEY, JSON.stringify({ version: 2, broadcasts: "bad", customers: [] }));
   assert.throws(() => loadMockState(storage), /형식/);
+});
+
+test("timestamps alone do not create a meaningful dashboard change", () => {
+  const state = emptyState();
+  const broadcast = addBroadcast(state, "수정 시각 테스트").state;
+  const timestampOnly = { ...broadcast, broadcasts: broadcast.broadcasts.map((item) => ({ ...item, updatedAt: "2026-09-09T00:00:00.000Z" })) };
+  assert.equal(hasMeaningfulDashboardChange(broadcast, timestampOnly), false);
+  const changedTitle = { ...timestampOnly, broadcasts: timestampOnly.broadcasts.map((item) => ({ ...item, title: "변경된 제목" })) };
+  assert.equal(hasMeaningfulDashboardChange(broadcast, changedTitle), true);
 });
 
 test("legacy Supabase broadcasts and shipping rounds migrate once without overwriting local data", () => {

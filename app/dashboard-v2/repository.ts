@@ -35,3 +35,24 @@ export function saveMockState(storage: StoragePort, state: DashboardState) {
   if (!isDashboardState(state)) throw new Error("저장 데이터 검증에 실패했습니다.");
   storage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
+
+function withoutUpdatedAt<T extends { updatedAt: string }>(record: T) {
+  const { updatedAt: _updatedAt, ...content } = record;
+  return content;
+}
+
+// A timestamp by itself is not a user change. Ignore it before deciding
+// whether to persist, so navigation and duplicate UI events cannot create a
+// misleading "last modified" update or a remote write.
+export function hasMeaningfulDashboardChange(before: DashboardState, after: DashboardState) {
+  if (before === after) return false;
+  return JSON.stringify({
+    version: before.version,
+    broadcasts: before.broadcasts.map(withoutUpdatedAt),
+    customers: before.customers.map(withoutUpdatedAt),
+  }) !== JSON.stringify({
+    version: after.version,
+    broadcasts: after.broadcasts.map(withoutUpdatedAt),
+    customers: after.customers.map(withoutUpdatedAt),
+  });
+}
