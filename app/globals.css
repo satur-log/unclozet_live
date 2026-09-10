@@ -149,8 +149,8 @@ html, body { background: #eef2f7; }
   .v2-mobile-head nav a{color:#657386}
   .v2-main{width:100%;max-width:none;margin-left:0;padding:28px 18px 56px}
   .v2-orders .v2-table-wrap{display:none}
-  .v2-mobile-order-list{display:grid;gap:10px}
-  .v2-mobile-order-card{display:grid;height:auto;width:100%;justify-items:stretch;gap:12px;border-color:#e6ebf1;background:var(--card);padding:16px;text-align:left;white-space:normal}
+  .v2-mobile-order-list{display:grid;width:100%;margin:0;padding:0;gap:10px}
+  .v2-mobile-order-card{display:grid;grid-template-columns:minmax(0,1fr);height:auto;width:100%;justify-content:stretch;justify-items:stretch;align-content:stretch;align-items:stretch;gap:12px;border-color:#e6ebf1;background:var(--card);padding:16px;text-align:left;white-space:normal}
   .v2-mobile-order-card-head{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px}
   .v2-mobile-order-card-head>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
   .v2-mobile-order-summary{display:flex;gap:18px;color:var(--muted-foreground);font-size:11px}
