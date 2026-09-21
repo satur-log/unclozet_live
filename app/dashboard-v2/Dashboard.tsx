@@ -23,7 +23,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { ChevronRight, Copy, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { ChartNoAxesCombined, ChevronRight, Copy, Download, Pencil, Plus, Trash2, Upload, UsersRound } from "lucide-react";
 
 const won = (value: number) => new Intl.NumberFormat("ko-KR", { style: "currency", currency: "KRW", maximumFractionDigits: 0 }).format(value);
 const displayDate = (value: string) => new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
@@ -48,7 +48,7 @@ const download = (bytes: Uint8Array, fileName: string) => {
 };
 
 function Icon({ name }: { name: "live" | "customer" | "mock" }) {
-  return <span className="v2-icon" aria-hidden="true">{name === "live" ? "◉" : name === "customer" ? "♙" : "◇"}</span>;
+  return <span className="v2-icon" aria-hidden="true">{name === "live" ? <ChartNoAxesCombined /> : name === "customer" ? <UsersRound /> : "◇"}</span>;
 }
 
 function Shell({ children, section }: { children: React.ReactNode; section: "broadcasts" | "customers" }) {
@@ -170,8 +170,8 @@ function BroadcastDetail({ broadcastId }: { broadcastId: string }) {
     <section className="v2-orders">
       <div className="v2-order-head"><h2>주문 목록</h2><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="아이디 또는 성명 검색" aria-label="주문 검색" /></div>
       <div className="v2-order-toolbar">
-        <div className="v2-filters">{filters.map(([value, label]) => <Button key={value} variant={filter === value ? "default" : "ghost"} size="sm" onClick={() => setFilter(value)}>{label}{value !== "ALL" ? <b>{value === "ISSUES" ? issueCount : counts[value]}</b> : null}</Button>)}</div>
-        <div className="v2-order-actions"><Button variant="outline" onClick={() => setOrderOpen(true)}><Plus data-icon="inline-start" />신규 주문서 등록</Button><Button disabled={!counts.READY} onClick={runExport}><Download data-icon="inline-start" />출력 대기 엑셀 출력 <b>{counts.READY}</b></Button></div>
+        <div className="v2-filters">{filters.map(([value, label]) => <Button key={value} className={`v2-filter-tab ${filter === value ? "active" : ""}`} variant={filter === value ? "default" : "ghost"} size="sm" onClick={() => setFilter(value)}>{label}{value !== "ALL" ? <b>{value === "ISSUES" ? issueCount : counts[value]}</b> : null}</Button>)}</div>
+        <div className="v2-order-actions"><Button className="v2-order-register" variant="outline" onClick={() => setOrderOpen(true)}><Plus data-icon="inline-start" />신규 주문서 등록</Button><Button disabled={!counts.READY} onClick={runExport}><Download data-icon="inline-start" />출력 대기 엑셀 출력 <b>{counts.READY}</b></Button></div>
       </div>
       <div className="v2-table-wrap">
         <Table>
