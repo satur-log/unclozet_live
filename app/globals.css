@@ -200,3 +200,5 @@ html, body { background: #eef2f7; }
 /* Navigation icons and order tabs use a single selected-state indicator. */
 .v2-sidebar nav a{min-height:50px;padding:7px 13px}.v2-sidebar .v2-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:#f2f2f2;color:#222;font-size:16px}.v2-sidebar .v2-icon svg{width:18px;height:18px;stroke-width:2.25}.v2-sidebar nav a.active .v2-icon{background:#e7f4ee;color:var(--green)}
 .v2-orders .v2-filters{border-bottom:0}
+.v2-sidebar nav a.active .v2-icon{background:#202124;color:#fff}
+.v2-refresh-notice{position:fixed;z-index:100;top:18px;left:50%;transform:translateX(-50%);border:1px solid #dedede;border-radius:8px;background:#fff;padding:9px 14px;box-shadow:0 8px 24px #20212418;color:#444;font-size:12px;font-weight:600}

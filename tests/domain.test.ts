@@ -66,6 +66,20 @@ test("order parser accepts dot, consecutive underscore and digit-leading IDs", (
   assert.equal(oneLineFreeform.shippingInfo.name, "백아름");
   assert.equal(oneLineFreeform.shippingInfo.address, "서울시 동작구 사당로 12");
   assert.equal(oneLineFreeform.shippingInfo.phone1, "010-5555-6666");
+  const withShippingMessage = parseKakaoOrder("인스타 아이디: message.case\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678\n배송메세지: 부재 시 문 앞에 놓아주세요", []);
+  assert.equal(withShippingMessage.shippingInfo.memo, "부재 시 문 앞에 놓아주세요");
+  const freeformMessage = parseKakaoOrder("**yenny_moon**\n문예은\n010-1234-5678\n대구 동구 팔공로 8\n절대 초인종 누르지 말아주세요", []);
+  assert.equal(freeformMessage.instagramId, "yenny_moon");
+  assert.equal(freeformMessage.shippingInfo.name, "문예은");
+  assert.equal(freeformMessage.shippingInfo.address, "대구 동구 팔공로 8");
+  assert.equal(freeformMessage.shippingInfo.memo, "절대 초인종 누르지 말아주세요");
+  const slashSeparatedMessage = parseKakaoOrder("Jisookgood81 / 이지숙 / 서울 중구 대봉로 100길 1층 / 010.1234.5678 / 강아지 있으니 조심히 놔주세요", []);
+  assert.equal(slashSeparatedMessage.instagramId, "Jisookgood81");
+  assert.equal(slashSeparatedMessage.shippingInfo.name, "이지숙");
+  assert.equal(slashSeparatedMessage.shippingInfo.address, "서울 중구 대봉로 100길 1층");
+  assert.equal(slashSeparatedMessage.shippingInfo.phone1, "010-1234-5678");
+  assert.equal(slashSeparatedMessage.shippingInfo.memo, "강아지 있으니 조심히 놔주세요");
+  assert.equal(multiLineFreeform.shippingInfo.memo, "");
   assert.equal(normalizePhoneNumber("12345678"), "12345678");
 });
 
@@ -109,6 +123,7 @@ test("historical information requires confirmation and incomplete orders wait un
 test("READY information remains editable and export handles every READY order atomically", () => {
   let { state, broadcastId } = setup(["ready.one", "ready.two"]);
   for (const instagramId of ["ready.one", "ready.two"]) state = registerOrder(state, broadcastId, `인스타 아이디: ${instagramId}\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  state = registerOrder(state, broadcastId, `인스타 아이디: ready.one\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}\n부재 시 문 앞에 놓아주세요`).state;
   const order = state.broadcasts[0].orders.find((o) => o.instagramId === "ready.one")!;
   state = editOrder(state, broadcastId, order.id, info("777"));
   assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.status, "READY");
@@ -129,7 +144,7 @@ test("READY information remains editable and export handles every READY order at
   const firstDataRow = workbookText.match(/<row r="3">(.+?)<\/row>/)?.[1] ?? "";
   assert.equal((firstDataRow.match(/<c /g) ?? []).length, 7);
   assert.match(firstDataRow, /revised\.case/);
-  assert.doesNotMatch(workbookText, /배송 메모 테스트/);
+  assert.match(workbookText, /부재 시 문 앞에 놓아주세요/);
   assert.match(name, /2건\.xlsx$/);
   assert.equal(state.broadcasts[0].orders.filter((o) => o.status === "COMPLETED").length, 2);
   state = restoreOrder(state, broadcastId, order.id);

@@ -24,6 +24,7 @@ export type Order = {
   instagramId: string;
   settlementId: string | null;
   delivery: Delivery | null;
+  shippingMessage?: string;
   status: OrderStatus;
   registrationConfirmed: boolean;
   sourceText: string;

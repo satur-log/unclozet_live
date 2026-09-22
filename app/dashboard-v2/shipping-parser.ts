@@ -228,6 +228,21 @@ function valueForLabels(lines: string[], labels: string[]) {
   return "";
 }
 
+function trailingShippingMessage(lines: string[]) {
+  const lastAddressLine = lines.reduce((last, line, index) =>
+    looksLikeAddress(line) || /^(?:받으실\s*분(?:의)?\s*주소|받는\s*분\s*주소|받는분\s*주소|배송지|주소)\s*[:：=]/.test(line) ? index : last, -1);
+  const lastPhoneLine = lines.reduce((last, line, index) => looksLikePhone(line) ? index : last, -1);
+  if (lastAddressLine < 0 || lastPhoneLine < 0) return "";
+
+  // Free-form Kakao orders often place an unlabeled delivery request after
+  // the recipient's address and phone, in either order.
+  return lines.slice(Math.max(lastAddressLine, lastPhoneLine) + 1)
+    .filter((line) => !looksLikeAddress(line) && !looksLikePhone(line))
+    .filter((line) => !/^(?:품목(?:명)?|상품(?:명)?|주문\s*내역|우편번호|기타\s*연락처)\s*[:：=]/.test(line))
+    .map(cleanValue)
+    .join(" ");
+}
+
 function findParticipantId(text: string, lines: string[], participantIds: string[]) {
   const labeledId = valueForLabels(lines, ["인스타그램(?:\\s*아이디)?", "인스타(?:\\s*아이디)?", "instagram(?:\\s*id)?", "아이디", "id"]);
   const candidates = [labeledId, lines[0] ?? "", ...lines];
@@ -269,16 +284,15 @@ function findParticipantId(text: string, lines: string[], participantIds: string
 
 export function parseKakaoOrder(text: string, participantIds: string[]): ParsedKakaoOrder {
   const lines = text
-    .split(/\r?\n/)
+    // Sellers commonly separate fields with either line breaks or slashes.
+    // Treat both as field boundaries so a delivery request never becomes part
+    // of the address merely because the order arrived on one line.
+    .split(/\r?\n|\s*\/\s*/)
     .map((line) => line.trim())
     .filter(Boolean);
   const instagramId = findParticipantId(text, lines, participantIds);
   const fullText = lines.join(" / ");
-  const segments = text
-    .split(/\r?\n|\s+\/\s+/)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  const phoneMatches = [...segments, fullText].map(phoneCandidate).filter(Boolean);
+  const phoneMatches = [...lines, fullText].map(phoneCandidate).filter(Boolean);
   let parsedName = valueForLabels(lines, [
     "받으실\\s*분(?:의)?\\s*성함",
     "받는\\s*분(?:\\s*성명)?",
@@ -350,7 +364,7 @@ export function parseKakaoOrder(text: string, participantIds: string[]): ParsedK
       zipCode: "",
       phone1: normalizedPhone1,
       phone2: normalizedPhone2,
-      memo: valueForLabels(lines, ["배송\\s*메세지", "배송\\s*메시지", "요청사항", "메모"]),
+      memo: valueForLabels(lines, ["배송\\s*메세지", "배송\\s*메시지", "요청사항", "메모"]) || trailingShippingMessage(lines),
       items: valueForLabels(lines, ["품목명", "품목", "상품명", "상품", "주문\\s*내역"]),
     },
   };

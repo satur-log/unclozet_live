@@ -108,7 +108,7 @@ export function saveSettlement(state: DashboardState, broadcastId: string, memo:
       }
       continue;
     }
-    next.orders.push({ id: id(), instagramId: settlement.instagramId, settlementId: settlement.id, delivery: customer ? { ...customer.delivery } : null, status: "WAITING", registrationConfirmed: false, sourceText: "", extractionWarnings: [], conflict: null });
+    next.orders.push({ id: id(), instagramId: settlement.instagramId, settlementId: settlement.id, delivery: customer ? { ...customer.delivery } : null, shippingMessage: "", status: "WAITING", registrationConfirmed: false, sourceText: "", extractionWarnings: [], conflict: null });
   }
   next.orders = next.orders.map((order) => refreshStatus(next, order));
   return replaceBroadcast(state, next);
@@ -125,12 +125,12 @@ export function registerOrder(state: DashboardState, broadcastId: string, text: 
   if (existing?.status === "COMPLETED") throw new Error("완료된 주문은 출력 대기로 되돌린 후 수정하세요.");
   if (existing?.sourceText && sameDelivery(existing.delivery ?? emptyDelivery(), {
     name: parsed.shippingInfo.name, address: parsed.shippingInfo.address, phone: parsed.shippingInfo.phone1,
-  }) && !existing.conflict) return { state, orderId: existing.id };
+  }) && (existing.shippingMessage ?? "") === parsed.shippingInfo.memo && !existing.conflict) return { state, orderId: existing.id };
   const delivery = normalizedDelivery({ name: parsed.shippingInfo.name, address: parsed.shippingInfo.address, phone: parsed.shippingInfo.phone1 });
   const customer = customerFor(state, instagramId);
   const phones = new Set((text.match(/(?<!\d)010[\s.-]*\d{4}[\s.-]*\d{4}(?!\d)/g) ?? []).map(normalizePhoneNumber));
   const order: Order = {
-    id: existing?.id ?? id(), instagramId, settlementId: settlement?.id ?? null, delivery,
+    id: existing?.id ?? id(), instagramId, settlementId: settlement?.id ?? null, delivery, shippingMessage: parsed.shippingInfo.memo,
     status: "WAITING", registrationConfirmed: true, sourceText: text,
     extractionWarnings: phones.size > 1 ? ["연락처가 여러 개 추출되었습니다. 정보 수정에서 확인하세요."] : [],
     conflict: customer && !sameDelivery(customer.delivery, delivery) ? { previous: { ...customer.delivery }, incoming: { ...delivery }, customerId: customer.id } : null,
@@ -149,7 +149,7 @@ export function confirmPreviousInfo(state: DashboardState, broadcastId: string, 
   return replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? next : o) });
 }
 
-export function editOrder(state: DashboardState, broadcastId: string, orderId: string, delivery: Delivery, draftInstagramId = "") {
+export function editOrder(state: DashboardState, broadcastId: string, orderId: string, delivery: Delivery, draftInstagramId = "", draftShippingMessage?: string) {
   const broadcast = getBroadcast(state, broadcastId);
   const order = broadcast.orders.find((o) => o.id === orderId);
   if (!order || order.status === "COMPLETED") throw new Error("완료 주문은 출력 대기로 되돌린 후 수정하세요.");
@@ -161,7 +161,7 @@ export function editOrder(state: DashboardState, broadcastId: string, orderId: s
   const conflict = idChanged
     ? customer && !sameDelivery(customer.delivery, normalized) ? { previous: { ...customer.delivery }, incoming: normalized, customerId: customer.id } : null
     : order.conflict && !sameDelivery(order.conflict.previous, normalized) ? { ...order.conflict, incoming: normalized } : null;
-  const edited = { ...order, instagramId, delivery: normalized, extractionWarnings: [], registrationConfirmed: true, conflict };
+  const edited = { ...order, instagramId, delivery: normalized, shippingMessage: normalizeText(draftShippingMessage ?? order.shippingMessage ?? ""), extractionWarnings: [], registrationConfirmed: true, conflict };
   const refreshed = refreshStatus(broadcast, edited);
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? refreshed : o) });
   return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, normalized, broadcast.createdAt) } : next;
@@ -228,7 +228,7 @@ export function exportReadyOrders(state: DashboardState, broadcastId: string, de
   if (invalid.length) throw new Error(`엑셀 생성 중단: ${invalid.map((o) => o.instagramId || "아이디 없음").join(", ")} 주문을 수정하세요.`);
   const rows = ready.map((order) => {
     const info = normalizedDelivery(order.delivery!);
-    return [info.name, info.address, "", info.phone, info.phone, "", order.instagramId];
+    return [info.name, info.address, "", info.phone, info.phone, order.shippingMessage ?? "", order.instagramId];
   });
   const bytes = createShippingWorkbook(XLSX_HEADER, rows);
   const safeTitle = broadcast.title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 60);
