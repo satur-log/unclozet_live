@@ -85,6 +85,11 @@ function EditableBroadcastTitle({ broadcast }: { broadcast: Broadcast }) {
   return <input aria-label="방송 이름" value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setDraft(broadcast.title); e.currentTarget.blur(); } }} />;
 }
 
+function settlementErrorLabel(error: { line: number; text: string }) {
+  const match = error.text.match(/^\s*@?([a-z0-9._]+)/i);
+  return match?.[1] ? `@${match[1]}` : `${error.line}행`;
+}
+
 function OrderDrawer({ broadcast, order, close }: { broadcast: Broadcast; order: Order; close: () => void }) {
   const { state, commit } = useDashboard();
   const [compact, setCompact] = useState(false);
@@ -114,6 +119,7 @@ function OrderDrawer({ broadcast, order, close }: { broadcast: Broadcast; order:
 function BroadcastDetail({ broadcastId, basePath = "" }: { broadcastId: string; basePath?: string }) {
   const { state, commit, notify } = useDashboard();
   const router = useRouter();
+  const settlementInputRef = useRef<HTMLTextAreaElement>(null);
   const broadcast = state.broadcasts.find((b) => b.id === broadcastId);
   const [filter, setFilter] = useState<"ALL" | OrderStatus | "ISSUES">("ALL");
   const [query, setQuery] = useState("");
@@ -128,6 +134,15 @@ function BroadcastDetail({ broadcastId, basePath = "" }: { broadcastId: string; 
   const filtered = currentBroadcast.orders.filter((order) => (filter === "ALL" || (filter === "ISSUES" ? Boolean(order.sourceText) && orderIssues(currentBroadcast, order).length > 0 : order.status === filter)) && (!query.trim() || order.instagramId.toLowerCase().includes(query.toLowerCase()) || order.delivery?.name.includes(query)));
   const settlementAnalysis = analyzeSettlement(currentBroadcast.memo);
   const announcement = settlementAnalysis.announcement;
+  const isLocalTest = basePath === "/test";
+  function selectSettlementError(error: { line: number; text: string }) {
+    const field = settlementInputRef.current;
+    if (!field) return;
+    const lines = currentBroadcast.memoDraft.split(/\r?\n/);
+    const start = lines.slice(0, error.line - 1).reduce((length, line) => length + line.length + 1, 0);
+    field.focus();
+    field.setSelectionRange(start, start + (lines[error.line - 1] ?? error.text).length);
+  }
   function runSettlement() { commit((current) => saveSettlement(current, currentBroadcast.id, currentBroadcast.memoDraft), currentBroadcast.memoDraft.trim() ? "정산 내용을 분석했습니다." : "정산 입력을 비웠습니다."); }
   function runOrder() { let orderId = ""; const ok = commit((current) => { const result = registerOrder(current, currentBroadcast.id, currentBroadcast.orderDraft); orderId = result.orderId; return saveDraft(result.state, currentBroadcast.id, "orderDraft", ""); }, "주문서를 등록했습니다."); if (ok) { setOrderOpen(false); setSelectedId(orderId); } }
   function runExport() { const count = counts.READY; commit((current) => exportReadyOrders(current, currentBroadcast.id, download), `${count}건의 XLSX를 만들고 출력 완료로 이동했습니다.`); }
@@ -152,13 +167,13 @@ function BroadcastDetail({ broadcastId, basePath = "" }: { broadcastId: string; 
       <CardContent className="v2-settlement-grid">
         <div className="v2-settlement-input">
           <div className="v2-label-row"><label htmlFor="settlement">정산 주문 입력</label></div>
-          <Textarea id="settlement" value={currentBroadcast.memoDraft} onChange={(event) => commit((current) => saveDraft(current, currentBroadcast.id, "memoDraft", event.target.value))} placeholder="정산할 주문 내용을 붙여넣어 주세요." />
+          <Textarea ref={settlementInputRef} id="settlement" value={currentBroadcast.memoDraft} onChange={(event) => commit((current) => saveDraft(current, currentBroadcast.id, "memoDraft", event.target.value))} placeholder="정산할 주문 내용을 붙여넣어 주세요." />
           <Button onClick={runSettlement}>정산 분석 실행</Button>
         </div>
         <div className="v2-settlement-preview">
           <div className="v2-label-row"><label>공지용 정산 텍스트</label><Button variant="link" size="sm" disabled={!announcement} onClick={() => navigator.clipboard.writeText(announcement).then(() => notify("공지 텍스트를 복사했습니다.")).catch(() => notify("클립보드에 접근하지 못했습니다.", true))}><Copy data-icon="inline-start" />복사</Button></div>
           <pre>{announcement || "분석을 실행하면 공지용 정산 안내문이 여기에 표시됩니다."}</pre>
-          {settlementAnalysis.errors.map((error) => <Alert className="v2-parse-error" key={`${error.line}-${error.text}`}><AlertDescription>{error.line}행 · {error.message}</AlertDescription></Alert>)}
+          {settlementAnalysis.errors.map((error) => isLocalTest ? <Alert className="v2-parse-error v2-test-parse-error" key={`${error.line}-${error.text}`}><AlertDescription><div className="v2-test-parse-error-head"><strong>{settlementErrorLabel(error)} 정산 오류</strong><Button size="sm" onClick={() => selectSettlementError(error)}>입력에서 보기</Button></div><span>{error.message}</span></AlertDescription></Alert> : <Alert className="v2-parse-error" key={`${error.line}-${error.text}`}><AlertDescription>{error.line}행 · {error.message}</AlertDescription></Alert>)}
         </div>
       </CardContent>
     </Card>
