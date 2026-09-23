@@ -172,7 +172,7 @@ function BroadcastDetail({ broadcastId, basePath = "" }: { broadcastId: string; 
         <div className="v2-settlement-preview">
           <div className="v2-label-row"><label>공지용 정산 텍스트</label><Button variant="link" size="sm" disabled={!announcement} onClick={() => navigator.clipboard.writeText(announcement).then(() => notify("공지 텍스트를 복사했습니다.")).catch(() => notify("클립보드에 접근하지 못했습니다.", true))}><Copy data-icon="inline-start" />복사</Button></div>
           <pre>{announcement || "분석을 실행하면 공지용 정산 안내문이 여기에 표시됩니다."}</pre>
-          {settlementAnalysis.errors.map((error) => <Alert className="v2-parse-error v2-test-parse-error" key={`${error.line}-${error.text}`}><AlertDescription><div className="v2-test-parse-error-head"><strong>{settlementErrorLabel(error)} 정산 오류</strong><Button size="sm" onClick={() => selectSettlementError(error)}>입력에서 보기</Button></div><span>{error.message}</span></AlertDescription></Alert>)}
+          {settlementAnalysis.errors.map((error) => <Alert className="v2-parse-error v2-test-parse-error" key={`${error.line}-${error.text}`}><AlertDescription><div className="v2-test-parse-error-head"><strong>{settlementErrorLabel(error)} 정산 오류</strong><Button size="sm" onClick={() => selectSettlementError(error)}>입력에서 보기</Button></div></AlertDescription></Alert>)}
         </div>
       </CardContent>
     </Card>
