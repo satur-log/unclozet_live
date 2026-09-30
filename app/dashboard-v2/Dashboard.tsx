@@ -139,10 +139,17 @@ function BroadcastDetail({ broadcastId, basePath = "" }: { broadcastId: string; 
     if (!field) return;
     const lines = currentBroadcast.memoDraft.split(/\r?\n/);
     const start = lines.slice(0, error.line - 1).reduce((length, line) => length + line.length + 1, 0);
+    field.scrollIntoView({ behavior: "smooth", block: "center" });
     field.focus();
     field.setSelectionRange(start, start + (lines[error.line - 1] ?? error.text).length);
+    const lineHeight = Number.parseFloat(window.getComputedStyle(field).lineHeight) || 20;
+    field.scrollTop = Math.max(0, (error.line - 2) * lineHeight);
   }
-  function runSettlement() { commit((current) => saveSettlement(current, currentBroadcast.id, currentBroadcast.memoDraft), currentBroadcast.memoDraft.trim() ? "정산 내용을 분석했습니다." : "정산 입력을 비웠습니다."); }
+  function runSettlement() {
+    const errors = analyzeSettlement(currentBroadcast.memoDraft).errors;
+    const saved = commit((current) => saveSettlement(current, currentBroadcast.id, currentBroadcast.memoDraft), currentBroadcast.memoDraft.trim() ? "정산 내용을 분석했습니다." : "정산 입력을 비웠습니다.");
+    if (saved && errors[0]) window.requestAnimationFrame(() => selectSettlementError(errors[0]));
+  }
   function runOrder() { let orderId = ""; const ok = commit((current) => { const result = registerOrder(current, currentBroadcast.id, currentBroadcast.orderDraft); orderId = result.orderId; return saveDraft(result.state, currentBroadcast.id, "orderDraft", ""); }, "주문서를 등록했습니다."); if (ok) { setOrderOpen(false); setSelectedId(orderId); } }
   function runExport() { const count = counts.READY; commit((current) => exportReadyOrders(current, currentBroadcast.id, download), `${count}건의 XLSX를 만들고 출력 완료로 이동했습니다.`); }
   function remove() { if (commit((current) => deleteBroadcast(current, currentBroadcast.id), "방송을 삭제했습니다.")) router.push(basePath || "/"); }
