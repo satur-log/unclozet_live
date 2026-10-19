@@ -49,6 +49,15 @@ export function customerFor(state: DashboardState, instagramId: string) {
   return state.customers.find((customer) => sameId(customer.instagramId, instagramId));
 }
 
+/** 아이디만 저장된 고객(주문서 없이 체크·차단만 해둔 경우)인지. */
+export const hasSavedDelivery = (customer: Customer) => Boolean(customer.delivery.name.trim() || customer.delivery.address.trim() || customer.delivery.phone.trim());
+
+/** 배송정보를 채우거나 비교할 때 쓰는 고객. 아이디만 있는 고객은 비교할 정보가 없으므로 없는 것으로 본다. */
+function savedCustomerFor(state: DashboardState, instagramId: string) {
+  const customer = customerFor(state, instagramId);
+  return customer && hasSavedDelivery(customer) ? customer : undefined;
+}
+
 function updateCustomer(state: DashboardState, instagramId: string, delivery: Delivery, orderedAt?: string): Customer[] {
   const customer = customerFor(state, instagramId);
   if (customer) return state.customers.map((c) => c.id === customer.id ? { ...c, delivery: { ...delivery }, updatedAt: now(), lastOrderedAt: [c.lastOrderedAt, orderedAt].filter((value): value is string => Boolean(value)).sort().at(-1) } : c);
@@ -99,7 +108,7 @@ export function saveSettlement(state: DashboardState, broadcastId: string, memo:
     return { ...order, settlementId: settlement?.id ?? null };
   }).filter((order) => order.settlementId || order.delivery || order.sourceText || order.status === "COMPLETED");
   for (const settlement of settlements) {
-    const customer = customerFor(state, settlement.instagramId);
+    const customer = savedCustomerFor(state, settlement.instagramId);
     const existingIndex = next.orders.findIndex((order) => order.settlementId === settlement.id);
     if (existingIndex >= 0) {
       const existing = next.orders[existingIndex];
@@ -127,7 +136,7 @@ export function registerOrder(state: DashboardState, broadcastId: string, text: 
     name: parsed.shippingInfo.name, address: parsed.shippingInfo.address, phone: parsed.shippingInfo.phone1,
   }) && (existing.shippingMessage ?? "") === parsed.shippingInfo.memo && !existing.conflict) return { state, orderId: existing.id };
   const delivery = normalizedDelivery({ name: parsed.shippingInfo.name, address: parsed.shippingInfo.address, phone: parsed.shippingInfo.phone1 });
-  const customer = customerFor(state, instagramId);
+  const customer = savedCustomerFor(state, instagramId);
   const phones = new Set((text.match(/(?<!\d)010[\s.-]*\d{4}[\s.-]*\d{4}(?!\d)/g) ?? []).map(normalizePhoneNumber));
   const order: Order = {
     id: existing?.id ?? id(), instagramId, settlementId: settlement?.id ?? null, delivery, shippingMessage: parsed.shippingInfo.memo,
@@ -156,7 +165,7 @@ export function editOrder(state: DashboardState, broadcastId: string, orderId: s
   const instagramId = canonicalInstagramId(draftInstagramId || order.instagramId);
   if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
   const normalized = normalizedDelivery(delivery);
-  const customer = customerFor(state, instagramId);
+  const customer = savedCustomerFor(state, instagramId);
   const idChanged = !sameId(order.instagramId, instagramId);
   const conflict = idChanged
     ? customer && !sameDelivery(customer.delivery, normalized) ? { previous: { ...customer.delivery }, incoming: normalized, customerId: customer.id } : null
@@ -185,7 +194,7 @@ export function matchOrder(state: DashboardState, broadcastId: string, orderId: 
   if (!order || !settlement || order.status === "COMPLETED") throw new Error("연결할 주문을 확인하세요.");
   const occupied = broadcast.orders.find((o) => o.settlementId === settlementId && o.id !== orderId);
   if (occupied && (occupied.registrationConfirmed || occupied.status !== "WAITING")) throw new Error("이미 주문서가 등록된 정산 주문입니다.");
-  const customer = customerFor(state, settlement.instagramId);
+  const customer = savedCustomerFor(state, settlement.instagramId);
   const matched = { ...order, instagramId: settlement.instagramId, settlementId,
     conflict: customer && order.delivery && !sameDelivery(customer.delivery, order.delivery) ? { previous: { ...customer.delivery }, incoming: { ...order.delivery }, customerId: customer.id } : null };
   const nextOrder = refreshStatus(broadcast, matched);
@@ -241,7 +250,9 @@ export function exportReadyOrders(state: DashboardState, broadcastId: string, de
 
 export function editCustomer(state: DashboardState, customerId: string, delivery: Delivery, draftInstagramId = "") {
   const normalized = normalizedDelivery(delivery);
-  if (deliveryIssues(normalized).length) throw new Error("성명, 주소와 010 형식의 연락처를 입력하세요.");
+  const blank = !normalized.name && !normalized.address && !normalized.phone;
+  // 아이디만 있는 고객은 배송정보를 비워 둔 채 저장할 수 있다.
+  if (!blank && deliveryIssues(normalized).length) throw new Error("성명, 주소와 010 형식의 연락처를 입력하세요.");
   const customer = state.customers.find((item) => item.id === customerId);
   if (!customer) throw new Error("고객 정보를 찾을 수 없습니다.");
   const instagramId = canonicalInstagramId(draftInstagramId || customer.instagramId);
@@ -249,6 +260,16 @@ export function editCustomer(state: DashboardState, customerId: string, delivery
   if (state.customers.some((item) => item.id !== customerId && sameId(item.instagramId, instagramId))) throw new Error("이미 저장된 인스타그램 아이디입니다.");
   const lastOrderedAt = customerLastOrderedAt(state, customer);
   return { ...state, customers: state.customers.map((item) => item.id === customerId ? { ...item, instagramId, delivery: normalized, updatedAt: now(), lastOrderedAt: lastOrderedAt ?? item.lastOrderedAt } : item) };
+}
+
+/** 주문서를 쓰지 않은 사람도 체크·차단을 이어가도록 아이디만으로 고객을 만든다. 이미 있으면 그 고객을 돌려준다. */
+export function ensureCustomer(state: DashboardState, draftInstagramId: string): { state: DashboardState; customerId: string; created: boolean } {
+  const instagramId = canonicalInstagramId(draftInstagramId);
+  if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
+  const existing = customerFor(state, instagramId);
+  if (existing) return { state, customerId: existing.id, created: false };
+  const customer: Customer = { id: id(), instagramId, delivery: emptyDelivery(), updatedAt: now(), blocked: false, legacyCheckCount: 0, checkHistory: [] };
+  return { state: { ...state, customers: [customer, ...state.customers] }, customerId: customer.id, created: true };
 }
 
 export function deleteCustomer(state: DashboardState, customerId: string) {

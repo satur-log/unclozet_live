@@ -23,6 +23,10 @@
     "app/dashboard-v2/mock-data.ts",
     "app/dashboard-v2/repository.ts",
     "app/dashboard-v2/remote-repository.ts",
+    "app/group-buy/types.ts",
+    "app/group-buy/pricing.ts",
+    "app/group-buy/model.ts",
+    "app/group-buy/mock.ts",
     "tests/**/*.test.ts"
   ]
 }

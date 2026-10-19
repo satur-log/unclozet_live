@@ -9,7 +9,7 @@ import { createShippingWorkbook } from "../app/dashboard-v2/workbook";
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
   deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
-  saveSettlement, setCustomerBlocked,
+  ensureCustomer, saveSettlement, setCustomerBlocked,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
 import { hasMeaningfulDashboardChange, isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
@@ -336,4 +336,31 @@ test("remote initialization keeps newer local records and remote-only records", 
   assert.equal(merged.customers.length, 1);
   assert.match(merged.customers[0].delivery.address, /200호/);
   assert.deepEqual(new Set(merged.customers[0].checkHistory?.map((check) => check.id)), new Set(["remote-check", "local-check"]));
+});
+
+test("an ID-only customer keeps checks and blocks across broadcasts without inventing delivery conflicts", () => {
+  // 첫 방송: 주문서를 안 쓴 사람을 아이디만으로 체크해 둔다.
+  let { state, broadcastId } = setup(["first.timer"]);
+  const ensured = ensureCustomer(state, "@First.Timer");
+  state = addCustomerCheck(ensured.state, ensured.customerId, "2026-10-15", "주문서 미작성");
+  assert.equal(ensureCustomer(state, "first.timer").created, false);
+  assert.equal(state.customers.length, 1);
+  assert.deepEqual(state.customers[0].delivery, { name: "", address: "", phone: "" });
+  // 아이디만 있는 고객은 정산 분석 때 빈 배송정보를 채우지 않는다.
+  state = saveSettlement(state, broadcastId, "first.timer - 1번 1.5");
+  const order = state.broadcasts[0].orders[0];
+  assert.equal(order.delivery, null);
+  assert.equal(order.status, "WAITING");
+  // 다음에 주문서를 쓰면 충돌 없이 출력 대기가 되고, 체크 이력은 그대로 이어진다.
+  state = registerOrder(state, broadcastId, `인스타 아이디: first.timer\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+  const registered = state.broadcasts[0].orders[0];
+  assert.equal(registered.conflict, null);
+  assert.equal(registered.status, "READY");
+  assert.equal(state.customers.length, 1);
+  assert.equal(customerCheckCount(state.customers[0]), 1);
+  assert.equal(state.customers[0].delivery.name, info().name);
+  // 배송정보 없이 아이디만 고쳐 저장할 수도 있다.
+  const blank = ensureCustomer(state, "only.id");
+  assert.doesNotThrow(() => editCustomer(blank.state, blank.customerId, { name: "", address: "", phone: "" }, "only.id2"));
+  assert.throws(() => editCustomer(blank.state, blank.customerId, { name: "이름만", address: "", phone: "" }));
 });
