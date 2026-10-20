@@ -107,6 +107,7 @@ export function saveSettlement(state: DashboardState, broadcastId: string, memo:
     const settlement = settlements.find((s) => s.id === order.settlementId);
     return { ...order, settlementId: settlement?.id ?? null };
   }).filter((order) => order.settlementId || order.delivery || order.sourceText || order.status === "COMPLETED");
+  const relinked = new Set<string>();
   for (const settlement of settlements) {
     const customer = savedCustomerFor(state, settlement.instagramId);
     const existingIndex = next.orders.findIndex((order) => order.settlementId === settlement.id);
@@ -117,10 +118,16 @@ export function saveSettlement(state: DashboardState, broadcastId: string, memo:
       }
       continue;
     }
+    // 정산 줄이 없어서 연결되지 못했던 주문서(같은 아이디)는 정산 줄이 생기면 그 주문에 바로 잇는다.
+    const orphanIndex = next.orders.findIndex((order) => !order.settlementId && order.status !== "COMPLETED" && sameId(order.instagramId, settlement.instagramId));
+    if (orphanIndex >= 0) { next.orders[orphanIndex] = { ...next.orders[orphanIndex], settlementId: settlement.id }; relinked.add(next.orders[orphanIndex].id); continue; }
     next.orders.push({ id: id(), instagramId: settlement.instagramId, settlementId: settlement.id, delivery: customer ? { ...customer.delivery } : null, shippingMessage: "", status: "WAITING", registrationConfirmed: false, sourceText: "", extractionWarnings: [], conflict: null });
   }
   next.orders = next.orders.map((order) => refreshStatus(next, order));
-  return replaceBroadcast(state, next);
+  let saved = replaceBroadcast(state, next);
+  // 다시 이어져 출력 대기가 된 주문서는 주문서 등록 때처럼 고객 정보도 저장한다.
+  for (const order of next.orders) if (relinked.has(order.id) && order.status === "READY" && order.delivery) saved = { ...saved, customers: updateCustomer(saved, order.instagramId, order.delivery, next.createdAt) };
+  return saved;
 }
 
 export function registerOrder(state: DashboardState, broadcastId: string, text: string) {

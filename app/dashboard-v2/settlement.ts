@@ -162,7 +162,14 @@ export function analyzeSettlement(text: string) {
     if (!original.trim()) return;
     // 정산 형식으로 시작하지 않는 안내문과 메모는 공지 생성 대상에서
     // 조용히 제외한다. Instagram ID처럼 보이는 행만 형식 검증한다.
-    if (!/^\s*@?[A-Za-z0-9._]+\s*[:\-–—]\s*.+$/.test(original)) return;
+    if (!/^\s*@?[A-Za-z0-9._]+\s*[:\-–—]\s*.+$/.test(original)) {
+      // 아이디 뒤에 금액이 있는데 구분자(-)만 빠졌거나 잘못 친 줄(예: "id _ 2.09 + 5", "id 1.29")은
+      // 안내문이 아니라 정산 누락이므로 오류로 알린다.
+      if (/^\s*@?(?=[A-Za-z0-9._]*[A-Za-z])[A-Za-z0-9._]+\s+(?:[^\sA-Za-z0-9가-힣]\s*)?\d+(?:[.,]\d+)?(?:\s*(?:[+*xX×]|번|$))/.test(original)) {
+        errors.push({ line: index + 1, text: original, message: "아이디와 금액 사이에 - 가 없어요. 예: 아이디 - 2.09 + 5" });
+      }
+      return;
+    }
     const line = settlementInputLine(original);
     const parsed = parseMemoLine(line);
     const content = line.match(/^\s*.*?\s*[:\-–—]\s*(.+?)\s*$/)?.[1] ?? "";

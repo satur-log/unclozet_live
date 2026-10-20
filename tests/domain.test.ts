@@ -364,3 +364,23 @@ test("an ID-only customer keeps checks and blocks across broadcasts without inve
   assert.doesNotThrow(() => editCustomer(blank.state, blank.customerId, { name: "", address: "", phone: "" }, "only.id2"));
   assert.throws(() => editCustomer(blank.state, blank.customerId, { name: "이름만", address: "", phone: "" }));
 });
+
+test("a settlement line with a wrong separator is reported, and fixing it links the waiting order form", () => {
+  // "_"로 잘못 친 줄은 안내문처럼 건너뛰지 않고 오류로 알린다.
+  const typo = analyzeSettlement("9/22\n1.\nNadoo_nadoo_ _ 2.09 + 5\nBomi415 1.29\n오늘 배송은 쉽니다\nok.buyer - 1.5");
+  assert.deepEqual(typo.errors.map((error) => error.line), [3, 4]);
+  assert.equal(typo.buyers.length, 1);
+  let { state, broadcastId } = setup(["ok.buyer"]);
+  state = saveSettlement(state, broadcastId, "ok.buyer - 1.5\nNadoo_nadoo_ _ 2.09 + 5");
+  state = registerOrder(state, broadcastId, `nadoo_nadoo_\n${info().name}\n${info().address}\n${info().phone}`).state;
+  let orphan = state.broadcasts[0].orders.find((order) => order.instagramId === "nadoo_nadoo_")!;
+  assert.equal(orphan.settlementId, null);
+  // 줄을 고쳐 다시 분석하면 중복 주문 없이 그 주문서에 이어지고 출력 대기가 된다.
+  state = saveSettlement(state, broadcastId, "ok.buyer - 1.5\nNadoo_nadoo_ - 2.09 + 5");
+  const nadoo = state.broadcasts[0].orders.filter((order) => order.instagramId.toLowerCase() === "nadoo_nadoo_");
+  assert.equal(nadoo.length, 1);
+  orphan = nadoo[0];
+  assert.notEqual(orphan.settlementId, null);
+  assert.equal(orphan.status, "READY");
+  assert.equal(state.customers.some((customer) => customer.instagramId === "nadoo_nadoo_"), true);
+});
