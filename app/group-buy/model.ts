@@ -2,7 +2,7 @@ import { XLSX_HEADER } from "../dashboard-v2/model";
 import { normalizePhoneNumber } from "../dashboard-v2/shipping-parser";
 import { createShippingWorkbook, createWorkbook } from "../dashboard-v2/workbook";
 import type { OrderStatus } from "../dashboard-v2/types";
-import { findOption, priceCart, remainingStock, totalsFor, type PricedCart } from "./pricing";
+import { findOption, isSoldOut, priceCart, remainingStock, shortageOf, totalsFor, type PricedCart } from "./pricing";
 import type { CartLine, CustomerInput, GbOrder, GbOrderEvent, GbOrderItem, GbStockLog, GroupBuy, GroupBuyState } from "./types";
 
 // Prototype "server". In production these become Supabase RPCs: the customer
@@ -54,7 +54,7 @@ export function availability(groupBuy: GroupBuy, now = new Date()): Availability
   if (groupBuy.status === "closed" || now > new Date(groupBuy.closesAt)) return { orderable: false, reason: "closed" };
   if (now < new Date(groupBuy.opensAt)) return { orderable: false, reason: "not-open" };
   const options = groupBuy.products.flatMap((product) => product.options);
-  if (options.length && options.every((option) => remainingStock(option) <= 0)) return { orderable: false, reason: "sold-out" };
+  if (options.length && options.every(isSoldOut)) return { orderable: false, reason: "sold-out" };
   return { orderable: true, reason: "open" };
 }
 
@@ -89,16 +89,15 @@ function applyStock(state: GroupBuyState, groupBuyId: string, deltas: Map<string
   };
 }
 
-function stockShortages(groupBuy: GroupBuy, deltas: Map<string, number>) {
-  const shortages: string[] = [];
+/** 수량을 늘리려는 옵션 중 품절 확정된 것. 재고가 모자란 건 막지 않는다(부족분은 추가 발주). */
+function soldOutLines(groupBuy: GroupBuy, deltas: Map<string, number>) {
+  const blocked: string[] = [];
   for (const [optionId, delta] of deltas) {
     if (delta <= 0) continue;
     const found = findOption(groupBuy, optionId);
-    if (!found) continue;
-    const left = remainingStock(found.option);
-    if (delta > left) shortages.push(`${found.product.name} ${found.option.name} (남은 ${left}개)`);
+    if (found && isSoldOut(found.option)) blocked.push(`${found.product.name} ${found.option.name}`);
   }
-  return shortages;
+  return blocked;
 }
 
 function nextOrderNo(state: GroupBuyState, now: Date) {
@@ -114,7 +113,7 @@ export type SubmitRequest = {
   /** 고객 화면에 보였던 최종 입금액. 서버 계산과 다르면 PRICE_CHANGED로 다시 확인받는다. */
   expectedTotal: number | null;
   source: GbOrder["source"];
-  /** 수기 등록에서 판매자가 한정 수량 초과를 허용한 경우 */
+  /** 수기 등록에서 판매자가 품절 확정 옵션도 넣기로 한 경우 */
   allowOverStock?: boolean;
 };
 export type SubmitResult =
@@ -135,8 +134,8 @@ export function submitOrder(state: GroupBuyState, request: SubmitRequest, now = 
   const priced = priceCart(groupBuy, request.lines, input.postcode, input.address);
   if (!priced.items.length) return { ok: false, code: "INVALID", message: "상품을 1개 이상 담아주세요." };
   const deltas = new Map(priced.items.map((item) => [item.optionId, item.quantity]));
-  const shortages = stockShortages(groupBuy, deltas);
-  if (shortages.length && !request.allowOverStock) return { ok: false, code: "STOCK", message: `재고가 부족합니다: ${shortages.join(", ")}`, priced };
+  const blocked = soldOutLines(groupBuy, deltas);
+  if (blocked.length && !request.allowOverStock) return { ok: false, code: "STOCK", message: `품절된 옵션이에요: ${blocked.join(", ")}`, priced };
   if (request.expectedTotal != null && request.expectedTotal !== priced.total) return { ok: false, code: "PRICE_CHANGED", message: "가격 또는 배송비가 바뀌었습니다. 변경된 금액을 확인해 주세요.", priced };
 
   const { seq, orderNo } = nextOrderNo(state, now);
@@ -150,7 +149,7 @@ export function submitOrder(state: GroupBuyState, request: SubmitRequest, now = 
     items: priced.items, subtotal: priced.subtotal, shippingFee: priced.shippingFee, discount: priced.discount, total: priced.total,
     status: "WAITING", sellerNote: "", courier: "", trackingNo: "", source: request.source,
     exportedAt: null, paidAt: null, trackingMatchedAt: null, cancelledAt: null, createdAt: iso(now),
-    events: [event(null, "WAITING", request.source === "form" ? "customer" : "admin", request.source === "form" ? "주문서 제출" : shortages.length ? `수기 등록 (재고 초과 허용: ${shortages.join(", ")})` : "수기 등록", now)],
+    events: [event(null, "WAITING", request.source === "form" ? "customer" : "admin", request.source === "form" ? "주문서 제출" : blocked.length ? `수기 등록 (품절 옵션 포함: ${blocked.join(", ")})` : "수기 등록", now)],
   };
   const next = applyStock({ ...state, orderSeq: seq, orders: [order, ...state.orders] }, groupBuy.id, deltas, "주문", order.id, now);
   return { ok: true, state: next, order };
@@ -270,8 +269,8 @@ export function editOrderItems(state: GroupBuyState, orderId: string, lines: Car
   const deltas = new Map<string, number>();
   for (const item of order.items) deltas.set(item.optionId, -item.quantity);
   for (const item of items) deltas.set(item.optionId, (deltas.get(item.optionId) ?? 0) + item.quantity);
-  const shortages = stockShortages(groupBuy, deltas);
-  if (shortages.length && !allowOverStock) throw new GroupBuyError("STOCK", `재고가 부족합니다: ${shortages.join(", ")}`);
+  const blocked = soldOutLines(groupBuy, deltas);
+  if (blocked.length && !allowOverStock) throw new GroupBuyError("STOCK", `품절된 옵션이에요: ${blocked.join(", ")}`);
   const totals = totalsFor(groupBuy, items, order.postcode, order.address);
   const summary = (list: GbOrderItem[]) => list.map((item) => `${item.optionName}×${item.quantity}`).join(", ");
   const edited = mapOrder(state, orderId, (item) => ({ ...item, items, subtotal: totals.subtotal, shippingFee: totals.shippingFee, discount: totals.discount, total: totals.total, events: [...item.events, event(null, null, "admin", `품목 수정: ${summary(order.items)} → ${summary(items)} (${order.total.toLocaleString()}원 → ${totals.total.toLocaleString()}원)`, now)] }));
@@ -395,14 +394,19 @@ export function trackingRowsFrom(rows: string[][], headerRow: number, columns: T
 
 // ── 관리자: 재고·리포트 ──────────────────────────────────
 
-export type StockRow = { productName: string; optionId: string; optionName: string; price: number; stockQty: number | null; waitingQty: number; paidQty: number; overdueQty: number; remaining: number; lowStockAlert: number; level: "unlimited" | "ok" | "low" | "out" };
-export function stockReport(state: GroupBuyState, groupBuy: GroupBuy, now = new Date()): StockRow[] {
+/**
+ * level: out = 품절 확정(주문 막힘), short = 재고보다 주문이 많음(추가 발주 필요), low = 남은 재고가 알림 기준 이하.
+ * shortage = 재고를 넘어 들어온 주문 수량.
+ */
+export type StockRow = { productName: string; optionId: string; optionName: string; price: number; stockQty: number | null; waitingQty: number; paidQty: number; remaining: number; shortage: number; soldOut: boolean; lowStockAlert: number; level: "unlimited" | "ok" | "low" | "short" | "out" };
+export function stockReport(state: GroupBuyState, groupBuy: GroupBuy): StockRow[] {
   const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
   return groupBuy.products.flatMap((product) => product.options.map((option) => {
     const qty = (filter: (order: GbOrder) => boolean) => orders.filter(filter).reduce((sum, order) => sum + order.items.filter((item) => item.optionId === option.id).reduce((s, item) => s + item.quantity, 0), 0);
     const remaining = remainingStock(option);
-    const level = option.stockQty == null ? "unlimited" : remaining <= 0 ? "out" : remaining <= option.lowStockAlert ? "low" : "ok";
-    return { productName: product.name, optionId: option.id, optionName: option.name, price: option.price, stockQty: option.stockQty, waitingQty: qty((order) => order.status === "WAITING"), paidQty: qty((order) => order.status !== "WAITING"), overdueQty: qty((order) => isOverdue(order, groupBuy, now)), remaining, lowStockAlert: option.lowStockAlert, level };
+    const shortage = shortageOf(option);
+    const level = isSoldOut(option) ? "out" : option.stockQty == null ? "unlimited" : shortage > 0 ? "short" : remaining <= option.lowStockAlert ? "low" : "ok";
+    return { productName: product.name, optionId: option.id, optionName: option.name, price: option.price, stockQty: option.stockQty, waitingQty: qty((order) => order.status === "WAITING"), paidQty: qty((order) => order.status !== "WAITING"), remaining, shortage, soldOut: isSoldOut(option), lowStockAlert: option.lowStockAlert, level };
   }));
 }
 
@@ -422,9 +426,38 @@ export function adjustStock(state: GroupBuyState, groupBuyId: string, optionId: 
   };
 }
 
+/** 품절 확정/해제. 확정하면 그 옵션은 고객 주문서에서 고를 수 없다(이미 들어온 주문은 그대로). */
+export function setSoldOut(state: GroupBuyState, groupBuyId: string, optionId: string, soldOut: boolean) {
+  const groupBuy = getGroupBuy(state, groupBuyId);
+  if (!findOption(groupBuy, optionId)) throw new GroupBuyError("NOT_FOUND", "옵션을 찾을 수 없습니다.");
+  return { ...state, groupBuys: state.groupBuys.map((item) => item.id !== groupBuyId ? item : { ...item, products: item.products.map((product) => ({ ...product, options: product.options.map((option) => option.id === optionId ? { ...option, soldOut } : option) })) }) };
+}
+
+/**
+ * 출력 대기 주문의 품목 합계. 이번에 보낼 수량(readyQty)을
+ * "재고 − 이미 택배 엑셀로 내보낸 수량"과 비교해 모자란 만큼(shortage)을 추가 발주 수량으로 본다.
+ */
+export type ReadyItemRow = { optionId: string; productName: string; optionName: string; readyQty: number; orderCount: number; shippedQty: number; stockQty: number | null; available: number | null; shortage: number; soldOut: boolean };
+export function readyItemsReport(state: GroupBuyState, groupBuy: GroupBuy): ReadyItemRow[] {
+  const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
+  const sum = (list: GbOrder[], optionId: string) => list.reduce((total, order) => total + order.items.filter((item) => item.optionId === optionId).reduce((s, item) => s + item.quantity, 0), 0);
+  const ready = orders.filter((order) => order.status === "READY");
+  const shipped = orders.filter((order) => order.status === "COMPLETED");
+  return groupBuy.products.flatMap((product) => product.options.map((option) => {
+    const readyQty = sum(ready, option.id);
+    const shippedQty = sum(shipped, option.id);
+    const available = option.stockQty == null ? null : Math.max(0, option.stockQty - shippedQty);
+    return {
+      optionId: option.id, productName: product.name, optionName: option.name, readyQty, shippedQty,
+      orderCount: ready.filter((order) => order.items.some((item) => item.optionId === option.id)).length,
+      stockQty: option.stockQty, available, shortage: available == null ? 0 : Math.max(0, readyQty - available), soldOut: isSoldOut(option),
+    };
+  })).filter((row) => row.readyQty > 0).sort((a, b) => b.shortage - a.shortage || b.readyQty - a.readyQty);
+}
+
 export function groupBuySummary(state: GroupBuyState, groupBuy: GroupBuy) {
   const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
-  const lowStock = stockReport(state, groupBuy).filter((row) => row.level === "low" || row.level === "out").length;
+  const lowStock = stockReport(state, groupBuy).filter((row) => row.level !== "ok" && row.level !== "unlimited").length;
   return { orders: orders.length, waiting: orders.filter((order) => order.status === "WAITING").length, revenue: orders.reduce((sum, order) => sum + order.total, 0), lowStock };
 }
 
@@ -434,8 +467,8 @@ export function allOrdersWorkbook(state: GroupBuyState, groupBuyId: string) {
   const header = ["주문번호", "주문일시", "접수 경로", "상태", "주문자", "휴대폰", "입금자명", "받는 분", "받는 분 연락처", "우편번호", "주소", "배송 메시지", "품목", "상품 금액", "배송비", "할인", "최종 금액", "입금 확인 일시", "택배사", "송장번호", "판매자 메모"];
   const rows = orders.map((order) => [order.orderNo, order.createdAt, order.source === "form" ? "주문서" : "수기", order.cancelledAt ? "취소" : statusLabels[order.status], order.customerName, order.phone, order.depositorName, order.recipientName, order.recipientPhone, order.postcode, `${order.address} ${order.addressDetail}`.trim(), order.shippingMessage, itemLabel(order), order.subtotal, order.shippingFee, order.discount, order.total, order.paidAt ?? "", order.courier, order.trackingNo, order.sellerNote]);
   const stock = stockReport(state, groupBuy);
-  const stockHeader = ["상품", "옵션", "단가", "전체 재고", "입금 전 수량", "입금 확인 수량", "주문 합계", "남은 재고"];
-  const stockRows = stock.map((row) => [row.productName, row.optionName, row.price, row.stockQty ?? "무제한", row.waitingQty, row.paidQty, row.waitingQty + row.paidQty, row.stockQty == null ? "무제한" : row.remaining]);
+  const stockHeader = ["상품", "옵션", "단가", "전체 재고", "입금 전 수량", "입금 확인 수량", "주문 합계", "남은 재고", "부족(추가 발주)", "품절 확정"];
+  const stockRows = stock.map((row) => [row.productName, row.optionName, row.price, row.stockQty ?? "무제한", row.waitingQty, row.paidQty, row.waitingQty + row.paidQty, row.stockQty == null ? "무제한" : row.remaining, row.shortage, row.soldOut ? "품절" : ""]);
   return {
     bytes: createWorkbook([{ name: "주문", rows: [header, ...rows] }, { name: "옵션별 집계", rows: [stockHeader, ...stockRows] }]),
     fileName: `${safeFileName(groupBuy.title)}-전체주문-${orders.length}건.xlsx`,
@@ -510,7 +543,7 @@ export function saveGroupBuy(state: GroupBuyState, draft: GroupBuy) {
   const kept = new Set(options.map((option) => option.id));
   const usedOptionIds = new Set(state.orders.filter((order) => order.groupBuyId === draft.id && !order.cancelledAt).flatMap((order) => order.items.map((item) => item.optionId)));
   const removedInUse = [...usedOptionIds].filter((optionId) => !kept.has(optionId));
-  if (removedInUse.length) throw new GroupBuyError("STATE", "주문이 들어온 옵션은 삭제할 수 없습니다. 재고를 0으로 두어 품절 처리하세요.");
+  if (removedInUse.length) throw new GroupBuyError("STATE", "주문이 들어온 옵션은 삭제할 수 없습니다. 재고 탭에서 품절 확정하세요.");
   const groupBuy: GroupBuy = {
     ...draft, slug, title: draft.title.trim(),
     discountTiers: draft.discountTiers.filter((tier) => tier.minSubtotal > 0 && tier.amount > 0).sort((a, b) => a.minSubtotal - b.minSubtotal),

@@ -17,6 +17,12 @@ export function remainingStock(option: GbOption) {
   return option.stockQty == null ? Infinity : Math.max(0, option.stockQty - option.orderedQty);
 }
 
+/** 주문을 막는 건 판매자가 확정한 품절뿐이다. */
+export const isSoldOut = (option: GbOption) => Boolean(option.soldOut);
+
+/** 재고보다 더 들어온 주문 수량 = 추가 발주가 필요한 수량. */
+export const shortageOf = (option: GbOption) => option.stockQty == null ? 0 : Math.max(0, option.orderedQty - option.stockQty);
+
 export function findOption(groupBuy: GroupBuy, optionId: string): { product: GbProduct; option: GbOption } | null {
   for (const product of groupBuy.products) {
     const option = product.options.find((item) => item.id === optionId);

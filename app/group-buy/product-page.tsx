@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { availability, groupBuyBySlug } from "./model";
-import { findOption, priceCart, remainingStock } from "./pricing";
+import { findOption, isSoldOut, priceCart } from "./pricing";
 import { saveSelection, useSelection, type Cart } from "./selection";
 import { SizeChartView } from "./size-chart";
 import { useGroupBuyState } from "./store";
@@ -142,7 +142,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
     const complete = resolveOption(item, result.selection);
     // 마지막 항목(컬러)까지 고르면 자동으로 담고, 종류만 남긴 채 다음 선택을 받는다.
     if (complete) {
-      if (remainingStock(complete) <= 0) { setMessage("품절된 조합이에요."); setChoice(result.selection); return; }
+      if (isSoldOut(complete)) { setMessage("품절된 조합이에요."); setChoice(result.selection); return; }
       setQty(complete.id, (lines[complete.id] ?? 0) + 1);
       const first = axes[0].name;
       setChoice(axes.length > 1 ? normalizeSelection(item, { [first]: result.selection[first] }).selection : {});
@@ -153,15 +153,15 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
   function setQty(optionId: string, quantity: number) {
     const found = findOption(gb, optionId);
     if (!found) return;
-    const left = remainingStock(found.option);
-    if (quantity > left) { setMessage(`${lineLabel(gb, item, optionId)}은(는) ${left}개까지 주문할 수 있어요.`); return; }
+    // 재고가 모자라도 주문은 받는다(판매자가 추가 발주). 품절 확정된 옵션만 막는다.
+    if (quantity > 0 && isSoldOut(found.option)) { setMessage(`${lineLabel(gb, item, optionId)}은(는) 품절됐어요.`); return; }
     setMessage("");
     setLines((current) => { const next = { ...current }; if (quantity <= 0) delete next[optionId]; else next[optionId] = quantity; return next; });
   }
   function buy() {
     let next = lines;
     // 담기를 누르지 않고 바로 구매하기를 눌러도, 옵션을 다 골랐으면 그 조합 1개로 주문한다.
-    if (!Object.keys(next).length && resolved && remainingStock(resolved) > 0) next = { [resolved.id]: 1 };
+    if (!Object.keys(next).length && resolved && !isSoldOut(resolved)) next = { [resolved.id]: 1 };
     if (!Object.keys(next).length) { setMessage(`${axes.map((axis) => axis.name).join(" · ")}을 모두 고르고 담아주세요.`); optionsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
     saveSelection(slug, { productId: item.id, lines: next });
     router.push(checkoutPath(slug));
@@ -191,7 +191,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
 
     {others.length ? <select className="gb-pdp-addon" value="" onChange={(e) => { if (e.target.value) setQty(e.target.value, (lines[e.target.value] ?? 0) + 1); }} aria-label="추가 상품">
       <option value="">추가 상품 (선택) · 함께 주문하면 배송비 한 번</option>
-      {others.map((other) => <optgroup key={other.id} label={other.name}>{other.options.map((option) => <option key={option.id} value={option.id} disabled={remainingStock(option) <= 0}>{option.name} · {won(option.price)}{remainingStock(option) <= 0 ? " (품절)" : ""}</option>)}</optgroup>)}
+      {others.map((other) => <optgroup key={other.id} label={other.name}>{other.options.map((option) => <option key={option.id} value={option.id} disabled={isSoldOut(option)}>{option.name} · {won(option.price)}{isSoldOut(option) ? " (품절)" : ""}</option>)}</optgroup>)}
     </select> : null}
 
     {Object.keys(lines).length ? <ul className="gb-pdp-lines">{Object.entries(lines).map(([optionId, quantity]) => {

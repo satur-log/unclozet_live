@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cancelOrder, confirmPayments, deleteGroupBuy, restoreGroupBuy, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
+import { cancelOrder, confirmPayments, deleteGroupBuy, readyItemsReport, restoreGroupBuy, setSoldOut, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
 import { createSeedState } from "../app/group-buy/mock";
 import { priceCart } from "../app/group-buy/pricing";
 import { remoteAreaOf } from "../app/group-buy/remote-area";
@@ -50,17 +50,41 @@ test("submit stores snapshot prices, order number, hashed pin and decrements sto
   assert.equal(next.stockLogs[0].change, -2);
 });
 
-test("server rejects over-stock, closed group buys, and asks again when price changed", () => {
+test("over-stock orders go through; only confirmed sold-out options, closed group buys and price changes stop an order", () => {
   const { state } = base();
+  // 재고(3)보다 많이 주문해도 받는다. 부족분은 추가 발주.
   const over = submitOrder(state, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 4 }], input: customer(), expectedTotal: null, source: "form" }, NOW);
-  assert.equal(over.ok, false); assert.equal(!over.ok && over.code, "STOCK");
+  assert.equal(over.ok, true);
+  const soldOut = setSoldOut(state, "gb", "a", true);
+  const blocked = submitOrder(soldOut, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 1 }], input: customer(), expectedTotal: null, source: "form" }, NOW);
+  assert.equal(!blocked.ok && blocked.code, "STOCK");
   const closed = submitOrder(state, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 1 }], input: customer(), expectedTotal: null, source: "form" }, later(60 * 25));
   assert.equal(!closed.ok && closed.code, "CLOSED");
   const changed = submitOrder(state, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 1 }], input: customer(), expectedTotal: 20000, source: "form" }, NOW);
   assert.equal(!changed.ok && changed.code, "PRICE_CHANGED");
   assert.equal(!changed.ok && changed.priced?.total, 23500);
-  const manual = submitOrder(state, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 4 }], input: customer(), expectedTotal: null, source: "manual", allowOverStock: true }, NOW);
+  const manual = submitOrder(soldOut, { groupBuyId: "gb", lines: [{ optionId: "a", quantity: 4 }], input: customer(), expectedTotal: null, source: "manual", allowOverStock: true }, NOW);
   assert.equal(manual.ok, true);
+});
+
+test("stock shortage and ready-to-ship item totals show how much to reorder", () => {
+  const { state } = base();
+  // 재고 3개인 옵션 a에 2 + 2 + 1 = 5개 주문. 1건은 이미 출력, 2건은 출력 대기.
+  let s = place(state, [{ optionId: "a", quantity: 2 }]).state;
+  const first = s.orders[0].id;
+  s = confirmPayments(s, [first], NOW);
+  s = exportReadyOrders(s, "gb", () => undefined, NOW);
+  s = place(s, [{ optionId: "a", quantity: 2 }]).state;
+  s = place(s, [{ optionId: "a", quantity: 1 }, { optionId: "b", quantity: 1 }]).state;
+  s = confirmPayments(s, s.orders.filter((o) => o.status === "WAITING").map((o) => o.id), NOW);
+  const row = stockReport(s, s.groupBuys[0]).find((r) => r.optionId === "a")!;
+  assert.equal(row.shortage, 2);
+  assert.equal(row.level, "short");
+  const ready = readyItemsReport(s, s.groupBuys[0]);
+  const a = ready.find((r) => r.optionId === "a")!;
+  // 이번에 보낼 3개 vs 재고 3 − 이미 보낸 2 = 1 → 2개 추가 발주
+  assert.deepEqual({ readyQty: a.readyQty, orderCount: a.orderCount, available: a.available, shortage: a.shortage }, { readyQty: 3, orderCount: 2, available: 1, shortage: 2 });
+  assert.equal(ready[0].optionId, "a");
 });
 
 test("price edits after an order do not change the stored order", () => {
@@ -89,7 +113,7 @@ test("cancel and item edits restore stock; status flow WAITING → READY → COM
   assert.equal(s.orders[0].status, "COMPLETED");
   s = cancelOrder(s, order.id, "", NOW);
   assert.equal(s.groupBuys[0].products[0].options[0].orderedQty, 0);
-  const report = stockReport(s, s.groupBuys[0], NOW);
+  const report = stockReport(s, s.groupBuys[0]);
   assert.equal(report[0].remaining, 3);
 });
 

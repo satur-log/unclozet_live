@@ -1,4 +1,4 @@
-import { remainingStock } from "./pricing";
+import { isSoldOut } from "./pricing";
 import type { GbOption, GbProduct, SizeChart, VariantAxis } from "./types";
 
 // 옵션 축(종류 → 기장 → 사이즈 → 컬러) 선택 규칙.
@@ -38,7 +38,7 @@ export function axisState(product: GbProduct, axisIndex: number, selection: Sele
     locked,
     values: axis.values.map((value) => {
       const options = pool.filter((option) => attrsOf(product, option)[axis.name] === value);
-      return { value, exists: options.length > 0, soldOut: options.length > 0 && options.every((option) => remainingStock(option) <= 0) };
+      return { value, exists: options.length > 0, soldOut: options.length > 0 && options.every(isSoldOut) };
     }),
   };
 }

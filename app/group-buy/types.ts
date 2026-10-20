@@ -11,6 +11,8 @@ export type GbOption = {
   stockQty: number | null;
   orderedQty: number;
   lowStockAlert: number;
+  /** 판매자가 품절로 확정한 옵션. 재고가 모자라도 이 값이 없으면 주문은 계속 받는다(부족분은 추가 발주). */
+  soldOut?: boolean;
   /** 옵션 축이 있는 상품에서 이 조합의 값. 예: { 종류: "슬림", 기장: "숏", 사이즈: "FREE", 컬러: "블랙" } */
   attrs?: Record<string, string>;
 };

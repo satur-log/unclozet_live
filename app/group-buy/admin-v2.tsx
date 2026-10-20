@@ -9,7 +9,7 @@ import { Shell } from "../dashboard-v2/shell";
 import {
   adjustStock, allOrdersWorkbook, cancelOrder, confirmPayments, COURIERS, createGroupBuy, differenceSmsText, duplicateGroupBuy, editOrderDelivery, editOrderItems, exportReadyOrders,
   groupBuyStatusLabels, paymentGuideText, reexportOrders, resetLookupPin, restoreGroupBuy, revertPayment, setSellerNote, setTracking, smsHref, statusLabels, stockReport,
-  trackingUrl, type DeliveryFields, type StockRow,
+  GroupBuyError, readyItemsReport, setSoldOut, trackingUrl, type DeliveryFields, type ReadyItemRow, type StockRow,
 } from "./model";
 import { ManualOrderV2, TrackingImportV2 } from "./dialogs-v2";
 import { SettingsV2 } from "./settings-v2";
@@ -85,7 +85,7 @@ function ListPage({ state }: { state: GroupBuyState }) {
       const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
       const waiting = orders.filter((order) => order.status === "WAITING").length;
       const ready = orders.filter((order) => order.status === "READY").length;
-      const low = stockReport(state, groupBuy).filter((row) => row.level === "low" || row.level === "out").length;
+      const low = stockReport(state, groupBuy).filter((row) => row.shortage > 0).length;
       const cover = groupBuy.products[0]?.images[0] ?? "";
       return <li key={groupBuy.id}>
         <Link href={adminPath(groupBuy.id)} className="gbx-list-row">
@@ -125,7 +125,7 @@ function DetailPage({ state, groupBuyId, initialTab }: { state: GroupBuyState; g
   if (!groupBuy) return <div className="gbx-empty"><strong>공구를 찾을 수 없어요.</strong><Link href={adminPath()}>공구 목록으로</Link></div>;
   const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id);
   const live = orders.filter((order) => !order.cancelledAt);
-  const low = stockReport(state, groupBuy).filter((row) => row.level === "low" || row.level === "out").length;
+  const low = stockReport(state, groupBuy).filter((row) => row.shortage > 0).length;
   const now = new Date();
 
   return <>
@@ -243,6 +243,8 @@ function OrdersView({ state, groupBuy }: { state: GroupBuyState; groupBuy: Group
       <label className="gbx-sort">정렬<select value={sort} onChange={(e) => setSort(e.target.value as Sort)}><option value="recent">최신순</option><option value="oldest">오래된순</option><option value="depositor">입금자명 가나다</option><option value="amount">금액순</option></select></label>
     </div>
 
+    {view === "ready" && counts.ready ? <ReadyItemsPanel state={state} groupBuy={groupBuy} /> : null}
+
     <div className="gbx-table-wrap">
       <table className="gbx-table">
         {/* 열 폭을 고정해 탭(필터)을 바꿔도 열 위치가 움직이지 않게 한다. */}
@@ -281,6 +283,43 @@ function OrdersView({ state, groupBuy }: { state: GroupBuyState; groupBuy: Group
     {manualOpen ? <ManualOrderV2 groupBuy={groupBuy} close={() => setManualOpen(false)} /> : null}
     {trackingOpen ? <TrackingImportV2 state={state} groupBuy={groupBuy} close={() => setTrackingOpen(false)} /> : null}
   </>;
+}
+
+/**
+ * 출력 대기 주문의 품목 합계. 택배 엑셀을 뽑기 전에 이번에 보낼 수량과 재고를 맞춰 보고,
+ * 모자란 품목은 바로 추가 발주 목록으로 복사한다.
+ */
+function ReadyItemsPanel({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupBuy }) {
+  const copy = useCopy();
+  const rows = readyItemsReport(state, groupBuy);
+  const short = rows.filter((row) => row.shortage > 0);
+  const totalQty = rows.reduce((sum, row) => sum + row.readyQty, 0);
+  const shortQty = short.reduce((sum, row) => sum + row.shortage, 0);
+  const label = (row: ReadyItemRow) => groupBuy.products.length > 1 ? `${row.productName} ${row.optionName}` : row.optionName;
+  const orderText = () => [`[${groupBuy.title}] 추가 발주`, ...short.map((row) => `${label(row)} ${row.shortage}개`), `합계 ${shortQty}개`].join("\n");
+  return <details className="gbx-ready" open>
+    <summary>
+      <span><b>출력 대기 품목</b> {rows.length}종 · {totalQty}개</span>
+      {short.length ? <span className="red">부족 {short.length}종 · 추가 발주 {shortQty}개</span> : <span className="ok">재고 충분</span>}
+      <ChevronDown />
+    </summary>
+    <div className="gbx-ready-body">
+      <table className="gbx-ready-table">
+        <thead><tr><th>품목</th><th className="num">주문</th><th className="num">보낼 수량</th><th className="num">남은 재고</th><th className="num">부족</th></tr></thead>
+        <tbody>{rows.map((row) => <tr key={row.optionId} className={row.shortage ? "short" : ""}>
+          <td>{label(row)}{row.soldOut ? <span className="gbx-pill cancelled">품절 확정</span> : null}</td>
+          <td className="num">{row.orderCount}건</td>
+          <td className="num"><b>{row.readyQty}</b></td>
+          <td className="num">{row.available == null ? "무제한" : row.available}</td>
+          <td className="num">{row.shortage ? <b className="red">{row.shortage}</b> : <span className="gbx-muted">—</span>}</td>
+        </tr>)}</tbody>
+      </table>
+      <div className="gbx-ready-foot">
+        <p className="gbx-help">남은 재고 = 전체 재고 − 이미 택배 엑셀로 내보낸 수량. 입고되면 재고 탭에서 수량을 더하세요.</p>
+        {short.length ? <button type="button" className="gbx-btn sm" onClick={() => copy(orderText(), "추가 발주 목록")}><Copy />발주 목록 복사</button> : null}
+      </div>
+    </div>
+  </details>;
 }
 
 /** 품목은 최대 두 줄. 3종까지 보여주고 나머지는 "외 N"으로 묶는다. */
@@ -348,7 +387,7 @@ function OrderPanel({ state, groupBuy, orderId, ids, onNavigate, onClose }: { st
   }
   function saveItems(allow: boolean) {
     try { updateGroupBuyState((current) => editOrderItems(current, order!.id, cartLines(cart), allow)); setEditing(null); setOverStock(false); toast({ message: "품목을 고치고 금액을 다시 계산했어요." }); }
-    catch (error) { if (error instanceof Error && error.message.startsWith("재고가 부족")) setOverStock(true); else run(() => { throw error; }); }
+    catch (error) { if (error instanceof GroupBuyError && error.code === "STOCK") setOverStock(true); else run(() => { throw error; }); }
   }
 
   return <div className="gbx-panel-layer">
@@ -378,8 +417,8 @@ function OrderPanel({ state, groupBuy, orderId, ids, onNavigate, onClose }: { st
             <CartPicker groupBuy={groupBuy} cart={cart} onChange={(next) => { setCart(next); setOverStock(false); }} compact allowOverStock reserved={reserved} />
             {preview ? <dl className="gbx-sum"><div><dt>상품</dt><dd>{won(preview.subtotal)}</dd></div><div><dt>배송비</dt><dd>{won(preview.shippingFee)}</dd></div><div className="total"><dt>바뀐 금액</dt><dd>{won(preview.total)}</dd></div></dl> : null}
             <p className="gbx-help">기존 옵션은 주문 당시 단가, 새로 넣은 옵션은 지금 단가로 계산해요.</p>
-            {overStock ? <p className="gbx-warn">한정 수량을 넘어요. 그래도 저장할까요?</p> : null}
-            <div className="gbx-sec-actions"><button type="button" className="gbx-btn ghost" onClick={() => { setEditing(null); setCart(reserved); setOverStock(false); }}>취소</button><button type="button" className="gbx-btn primary" onClick={() => saveItems(overStock)}>{overStock ? "초과 허용하고 저장" : "품목 저장"}</button></div>
+            {overStock ? <p className="gbx-warn">품절 확정된 옵션이 들어 있어요. 그래도 저장할까요?</p> : null}
+            <div className="gbx-sec-actions"><button type="button" className="gbx-btn ghost" onClick={() => { setEditing(null); setCart(reserved); setOverStock(false); }}>취소</button><button type="button" className="gbx-btn primary" onClick={() => saveItems(overStock)}>{overStock ? "품절 옵션 포함해 저장" : "품목 저장"}</button></div>
           </> : <>
             <ul className="gbx-items">{order.items.map((item) => <li key={item.optionId}><span>{item.itemName ?? item.optionName}</span><span>×{item.quantity}</span><b>{won(item.lineTotal)}</b></li>)}</ul>
             <dl className="gbx-sum">
@@ -478,9 +517,14 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
   const [picked, setPicked] = useState<string | null>(null);
   const [change, setChange] = useState("");
   const [reason, setReason] = useState("");
+  const copy = useCopy();
   const limited = report.filter((row) => row.stockQty != null);
   const total = limited.reduce((sum, row) => sum + (row.stockQty ?? 0), 0);
   const sold = limited.reduce((sum, row) => sum + row.waitingQty + row.paidQty, 0);
+  const left = limited.reduce((sum, row) => sum + row.remaining, 0);
+  const short = report.filter((row) => row.shortage > 0).sort((a, b) => b.shortage - a.shortage);
+  const shortQty = short.reduce((sum, row) => sum + row.shortage, 0);
+  const label = (row: StockRow) => groupBuy.products.length > 1 ? `${row.productName} ${row.optionName}` : row.optionName;
   const pickedRow = picked ? byId.get(picked) ?? null : null;
   const optionIds = new Set(report.map((row) => row.optionId));
   const logs = state.stockLogs.filter((log) => optionIds.has(log.optionId)).slice(0, 50);
@@ -495,9 +539,10 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
   const Cell = ({ row }: { row: StockRow }) => {
     const used = row.waitingQty + row.paidQty;
     const ratio = row.stockQty ? Math.min(1, used / row.stockQty) : 0;
-    return <button type="button" className={`gbx-cell ${row.level} ${picked === row.optionId ? "picked" : ""}`} onClick={() => pick(row.optionId)} aria-label={`${row.optionName} 남은 ${row.stockQty == null ? "무제한" : row.remaining}`}>
-      <strong>{row.stockQty == null ? "∞" : row.remaining}</strong>
-      <small>{row.level === "out" ? "품절" : row.stockQty == null ? "무제한" : `/ ${row.stockQty}`}</small>
+    return <button type="button" className={`gbx-cell ${row.level} ${picked === row.optionId ? "picked" : ""}`} onClick={() => pick(row.optionId)} aria-label={`${row.optionName} ${row.shortage ? `부족 ${row.shortage}` : `남은 ${row.stockQty == null ? "무제한" : row.remaining}`}${row.soldOut ? " · 품절 확정" : ""}`}>
+      {/* 부족하면 남은 수량 대신 모자란 수량을 −로 보여준다. */}
+      <strong>{row.stockQty == null ? "∞" : row.shortage ? `−${row.shortage}` : row.remaining}</strong>
+      <small>{row.soldOut ? "품절 확정" : row.stockQty == null ? "무제한" : row.shortage ? "부족" : `/ ${row.stockQty}`}</small>
       {row.stockQty != null ? <i style={{ width: `${ratio * 100}%` }} /> : null}
     </button>;
   };
@@ -506,14 +551,21 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
     <dl className="gbx-stock-sum">
       <div><dt>전체 재고</dt><dd>{total.toLocaleString()}</dd></div>
       <div><dt>주문된 수량</dt><dd>{sold.toLocaleString()}</dd></div>
-      <div><dt>남은 재고</dt><dd>{(total - sold).toLocaleString()}</dd></div>
-      <div><dt>품절 · 부족</dt><dd className="red">{report.filter((row) => row.level === "out").length} · {report.filter((row) => row.level === "low").length}</dd></div>
+      <div><dt>남은 재고</dt><dd>{left.toLocaleString()}</dd></div>
+      <div><dt>부족 (추가 발주)</dt><dd className={shortQty ? "red" : ""}>{shortQty.toLocaleString()}<small>{short.length ? ` · ${short.length}종` : ""}</small></dd></div>
+      <div><dt>품절 확정</dt><dd>{report.filter((row) => row.soldOut).length}</dd></div>
     </dl>
+
+    {short.length ? <section className="gbx-short">
+      <div className="gbx-sec-head"><h3>부족한 옵션 {short.length}종 · {shortQty}개</h3><button type="button" className="gbx-btn sm" onClick={() => copy([`[${groupBuy.title}] 추가 발주`, ...short.map((row) => `${label(row)} ${row.shortage}개`), `합계 ${shortQty}개`].join("\n"), "추가 발주 목록")}><Copy />발주 목록 복사</button></div>
+      <p className="gbx-help">재고보다 주문이 더 들어온 옵션이에요. 주문은 계속 받아요. 더 못 구하는 옵션은 칸을 눌러 ‘품절 확정’하면 고객이 고를 수 없어요.</p>
+      <ul className="gbx-short-list">{short.map((row) => <li key={row.optionId}><button type="button" onClick={() => pick(row.optionId)} className={picked === row.optionId ? "picked" : ""}><span>{label(row)}</span><b>{row.shortage}개</b>{row.soldOut ? <small>품절 확정</small> : null}</button></li>)}</ul>
+    </section> : null}
 
     {groupBuy.products.map((product) => {
       const grid = stockGrid(product);
       return <section key={product.id} className="gbx-sec">
-        <div className="gbx-sec-head"><h3>{product.name}</h3><span className="gbx-help">칸을 누르면 아래에서 수량을 조정할 수 있어요 · 남은 수량 / 전체</span></div>
+        <div className="gbx-sec-head"><h3>{product.name}</h3><span className="gbx-help">칸을 누르면 아래에서 수량 조정·품절 확정 · 남은 수량 / 전체 · 빨간 −숫자는 부족분</span></div>
         {grid ? <div className="gbx-matrix-wrap"><table className="gbx-matrix">
           <thead><tr><th>{grid.rowAxes.join(" · ")} \ {grid.colAxes.join(" · ")}</th>{grid.cols.map((col) => <th key={col}>{col}</th>)}</tr></thead>
           <tbody>{grid.rows.map((row) => <tr key={row}><th>{row}</th>{grid.cols.map((col) => { const option = grid.cell(row, col); const stock = option ? byId.get(option.id) : null; return <td key={col}>{stock ? <Cell row={stock} /> : <span className="gbx-cell none">—</span>}</td>; })}</tr>)}</tbody>
@@ -523,12 +575,16 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
 
     {pickedRow ? <section className="gbx-adjust" aria-label="재고 조정">
       <div className="gbx-adjust-head"><strong>{pickedRow.productName} · {pickedRow.optionName}</strong><button type="button" className="gbx-icon-btn" aria-label="닫기" onClick={() => setPicked(null)}><X /></button></div>
-      <dl className="gbx-kv row"><div><dt>전체</dt><dd>{pickedRow.stockQty ?? "무제한"}</dd></div><div><dt>입금 대기</dt><dd>{pickedRow.waitingQty}</dd></div><div><dt>입금 확인</dt><dd>{pickedRow.paidQty}</dd></div><div><dt>남은 재고</dt><dd className={pickedRow.level === "ok" ? "" : "red"}>{pickedRow.stockQty == null ? "—" : pickedRow.remaining}</dd></div></dl>
+      <dl className="gbx-kv row"><div><dt>전체</dt><dd>{pickedRow.stockQty ?? "무제한"}</dd></div><div><dt>입금 대기</dt><dd>{pickedRow.waitingQty}</dd></div><div><dt>입금 확인</dt><dd>{pickedRow.paidQty}</dd></div><div><dt>남은 재고</dt><dd>{pickedRow.stockQty == null ? "—" : pickedRow.remaining}</dd></div><div><dt>부족</dt><dd className={pickedRow.shortage ? "red" : ""}>{pickedRow.shortage}</dd></div></dl>
+      <div className="gbx-soldout-row">
+        <span>{pickedRow.soldOut ? <><b>품절 확정됨</b> · 고객이 이 옵션을 고를 수 없어요. 이미 들어온 주문은 그대로예요.</> : <>더 구할 수 없으면 품절 확정하세요. 확정 전까지는 재고가 모자라도 주문을 받아요.</>}</span>
+        <button type="button" className={`gbx-btn sm ${pickedRow.soldOut ? "" : "danger"}`} onClick={() => run((current) => setSoldOut(current, groupBuy.id, pickedRow.optionId, !pickedRow.soldOut), pickedRow.soldOut ? `${pickedRow.optionName} 품절을 해제했어요. 다시 주문받아요.` : `${pickedRow.optionName} 품절 확정. 고객 화면에서 막혔어요.`)}>{pickedRow.soldOut ? "품절 해제" : "품절 확정"}</button>
+      </div>
       {pickedRow.stockQty != null ? <div className="gbx-inline">
         <button type="button" className="gbx-btn" onClick={() => setChange(String((Number(change) || 0) - 1))}>−1</button>
         <input value={change} onChange={(e) => setChange(e.target.value.replace(/[^\d+-]/g, ""))} placeholder="+10 / -2" inputMode="numeric" aria-label="조정 수량" className="qty" />
         <button type="button" className="gbx-btn" onClick={() => setChange(String((Number(change) || 0) + 1))}>+1</button>
-        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="사유 (예: 2차 입고, 불량)" aria-label="조정 사유" className="grow" onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
+        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="사유 (예: 추가 발주 입고, 불량)" aria-label="조정 사유" className="grow" onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
         <button type="button" className="gbx-btn primary" disabled={!change || !reason.trim()} onClick={save}>조정 저장</button>
       </div> : <p className="gbx-help">재고를 관리하지 않는 옵션이에요. 설정에서 수량을 넣으면 조정할 수 있어요.</p>}
     </section> : null}

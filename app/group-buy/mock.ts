@@ -1,4 +1,4 @@
-import { cancelOrder, confirmPayments, DEFAULT_POLICY, exportReadyOrders, setSellerNote, setTracking, submitOrder } from "./model";
+import { cancelOrder, confirmPayments, DEFAULT_POLICY, exportReadyOrders, setSellerNote, setSoldOut, setTracking, submitOrder } from "./model";
 import { pantsImage, placeholderImage } from "./placeholder";
 import type { CartLine, CustomerInput, DetailBlock, GbOption, GbProduct, GroupBuy, GroupBuyState, SizeChart } from "./types";
 
@@ -127,7 +127,10 @@ const SURNAMES = "김이박최정강조윤장임한오서신권황안송류홍".
 const GIVEN = ["서연", "민준", "지우", "하윤", "도윤", "서준", "하은", "예린", "지민", "수아", "유나", "채원", "다은", "소율", "지아", "윤서", "시우", "은우", "가은", "나연", "수빈", "예준", "현우", "주원", "아린", "소윤", "은서", "다인", "하린", "지유"];
 const ADDRESSES = ["서울 마포구 월드컵북로 00", "서울 성동구 왕십리로 00", "서울 노원구 동일로 0000", "경기 수원시 영통구 광교중앙로 000", "경기 용인시 수지구 포은대로 000", "경기 화성시 동탄대로 000", "인천 남동구 인하로 000", "부산 수영구 광안해변로 000", "대구 달서구 월배로 000", "대전 서구 둔산로 000", "광주 서구 상무중앙로 00", "울산 남구 삼산로 000", "경남 창원시 성산구 중앙대로 000", "충북 청주시 흥덕구 대농로 00", "전북 전주시 완산구 효자로 000", "강원 춘천시 중앙로 00", "세종 한누리대로 000"];
 const MESSAGES = ["", "", "", "", "문 앞에 놓아주세요", "경비실에 맡겨주세요", "배송 전 연락 부탁드려요"];
-const STOCK_DEMO = [[["와이드", "슈퍼롱", "L", "멜란지"], 0], [["슬림", "롱", "FREE", "블랙"], 3]] as const;
+// 재고(50)를 넘겨 주문이 들어온 조합 = 부족(추가 발주 필요). 값이 음수면 그만큼 부족.
+const STOCK_DEMO = [[["와이드", "슈퍼롱", "L", "멜란지"], -4], [["슬림", "롱", "FREE", "블랙"], -3]] as const;
+/** 더 못 구해 판매자가 품절로 확정한 조합 */
+const SOLD_OUT_DEMO = ["와이드", "슈퍼롱", "L", "멜란지"];
 // 인기 조합일수록 많이 팔린다(PANTS_COMBOS 순서).
 const COMBO_WEIGHTS = [6, 5, 9, 8, 3, 3, 4, 5, 3, 4, 6, 8, 5, 7, 5, 6];
 
@@ -194,7 +197,7 @@ function seedPantsDemo(pants: GroupBuy, place: Place, store: { get: () => GroupB
   state = setTracking(state, tracked.map(([orderId], index) => ({ orderId, courier: "CJ대한통운", trackingNo: String(680_000_000_000 + index * 7919) })), "excel", at(EXPORT_AT - 3));
   for (const [id, hoursAgo] of paidAt) if (hoursAgo <= EXPORT_AT) state = confirmPayments(state, [id], at(hoursAgo));
 
-  // 3) 예외 몇 건: 입금 기한이 지나 취소, 입금액 부족 안내.
+  // 3) 예외 몇 건: 고객 요청 취소, 입금액 부족 안내.
   const unpaid = orders.filter((order) => !paidAt.has(order.id));
   const cancelTargets = unpaid.filter((order) => order.hoursAgo > 26).slice(0, 3);
   for (const order of cancelTargets) state = cancelOrder(state, order.id, "고객 요청 취소", at(order.hoursAgo - 25));
@@ -203,4 +206,5 @@ function seedPantsDemo(pants: GroupBuy, place: Place, store: { get: () => GroupB
   store.set(state);
   // 취소로 풀린 재고는 최근 주문으로 다시 채운다.
   fillTo(() => 1 + random() * 7);
+  store.set(setSoldOut(store.get(), pants.id, pantsOptionId(SOLD_OUT_DEMO), true));
 }

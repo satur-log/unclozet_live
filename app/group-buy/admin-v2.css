@@ -582,3 +582,52 @@
 .gbs-danger > div { display: flex; gap: 6px; }
 .gbx-link.muted { color: #aaa; font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
 .gbx-link.muted:hover { color: var(--x-red); }
+
+/* ── 재고 부족 · 품절 확정 ── */
+.gbx-stock-sum { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.gbx-stock-sum dd small { margin-left: 2px; color: var(--x-muted); font-size: 13px; font-weight: 500; }
+.gbx-stock-sum dd.red { color: var(--x-red); }
+.gbx-cell.short { background: #fff1f1; }
+.gbx-cell.short strong, .gbx-cell.short small { color: var(--x-red); }
+.gbx-cell.short i { background: var(--x-red); }
+/* 품절 확정은 이미 결정된 상태라 회색으로 가라앉힌다(부족만 빨강으로 눈에 띄게). */
+.gbx-cell.out { background: #f2f2f2; }
+.gbx-cell.out strong { color: #999; text-decoration: line-through; }
+.gbx-cell.out small { color: #777; font-weight: 600; }
+.gbx-cell.out i { background: #bbb; }
+.gbx-short { margin: 16px 0 4px; padding: 16px 18px; border: 1px solid #f3c5c8; background: #fffafa; }
+.gbx-short .gbx-sec-head { margin-bottom: 6px; }
+.gbx-short h3 { color: var(--x-red); }
+.gbx-short-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.gbx-short-list button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid #f0c4c7; border-radius: 3px; background: #fff; color: var(--x-ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.gbx-short-list button b { color: var(--x-red); }
+.gbx-short-list button small { color: #888; font-size: 11px; }
+.gbx-short-list button:hover, .gbx-short-list button.picked { border-color: var(--x-ink); }
+.gbx-soldout-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 4px 0 12px; padding: 10px 12px; background: var(--x-soft); color: #555; font-size: 12.5px; }
+.gbx-soldout-row b { color: var(--x-ink); }
+
+/* ── 출력 대기 품목 합계 ── */
+.gbx-ready { margin-top: 14px; border: 1px solid var(--x-line); background: #fff; }
+.gbx-ready summary { display: flex; align-items: center; gap: 14px; padding: 12px 16px; font-size: 13.5px; list-style: none; cursor: pointer; }
+.gbx-ready summary::-webkit-details-marker { display: none; }
+.gbx-ready summary b { font-weight: 700; }
+.gbx-ready summary .red { color: var(--x-red); font-weight: 700; }
+.gbx-ready summary .ok { color: var(--x-muted); }
+.gbx-ready summary svg { width: 15px; height: 15px; margin-left: auto; color: #999; }
+.gbx-ready[open] summary svg { transform: rotate(180deg); }
+.gbx-ready-body { padding: 0 16px 14px; }
+.gbx-ready-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.gbx-ready-table th { height: 32px; padding: 0 8px; border-bottom: 1px solid var(--x-line); color: var(--x-muted); font-size: 11.5px; font-weight: 500; text-align: left; }
+.gbx-ready-table td { height: 34px; padding: 0 8px; border-bottom: 1px solid #f3f3f3; }
+.gbx-ready-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.gbx-ready-table tr.short td { background: #fffafa; }
+.gbx-ready-table td .gbx-pill { height: 18px; margin-left: 6px; font-size: 10.5px; }
+.gbx-ready-table b.red { color: var(--x-red); }
+.gbx-ready-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }
+.gbx-ready-foot .gbx-btn svg { width: 13px; height: 13px; }
+@media (max-width: 720px) {
+  .gbx-stock-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gbx-ready summary { flex-wrap: wrap; gap: 4px 12px; }
+  .gbx-ready-foot, .gbx-soldout-row { flex-direction: column; align-items: stretch; }
+}
+.gbx-muted { color: #bbb; }

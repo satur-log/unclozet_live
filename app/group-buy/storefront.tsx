@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ReceiptText } from "lucide-react";
 import { availability, groupBuyBySlug, type Availability } from "./model";
-import { remainingStock } from "./pricing";
+import { isSoldOut } from "./pricing";
 import { useGroupBuyState } from "./store";
 import type { GbProduct, GroupBuy } from "./types";
 import { adminPath, longDateTime, lookupPath, orderFormPath, ProductThumb, productPath, won } from "./ui";
@@ -74,7 +74,7 @@ export function priceRange(product: GbProduct) {
   return { min: Math.min(...prices), max: Math.max(...prices) };
 }
 const discountRate = (original: number | null, price: number) => original && original > price ? Math.round(((original - price) / original) * 100) : 0;
-const productSoldOut = (product: GbProduct) => product.options.every((option) => remainingStock(option) <= 0);
+const productSoldOut = (product: GbProduct) => product.options.every(isSoldOut);
 
 function PriceTag({ product, large = false }: { product: GbProduct; large?: boolean }) {
   const { min, max } = priceRange(product);
@@ -129,9 +129,8 @@ export function StoreHomePage({ slug }: { slug: string }) {
         <h2>공구 상품 <span>{groupBuy.products.length}</span></h2>
         <ul className="gb-product-grid">{groupBuy.products.map((product) => {
           const soldOut = productSoldOut(product);
-          const lowest = Math.min(...product.options.map(remainingStock));
           return <li key={product.id}><Link href={productPath(slug, product.id)} className={soldOut ? "sold-out" : ""}>
-            <div className="gb-card-image">{product.images[0] ? <img src={product.images[0]} alt="" loading="lazy" /> : <ProductThumb name={product.name} imageUrl="" size={0} />}{soldOut ? <span className="gb-overlay">품절</span> : Number.isFinite(lowest) && lowest <= 5 ? <span className="gb-flag">품절 임박</span> : null}</div>
+            <div className="gb-card-image">{product.images[0] ? <img src={product.images[0]} alt="" loading="lazy" /> : <ProductThumb name={product.name} imageUrl="" size={0} />}{soldOut ? <span className="gb-overlay">품절</span> : null}</div>
             <strong>{product.name}</strong>
             {product.summary ? <p>{product.summary}</p> : null}
             <PriceTag product={product} />

@@ -8,7 +8,7 @@ import type { GroupBuyState } from "./types";
 // by the admin screens and the customer screens on the same origin. Nothing is
 // sent to Supabase. Other tabs pick up changes through the storage event.
 
-export const GROUP_BUY_STORAGE_KEY = "unclozet-group-buy-prototype-v8";
+export const GROUP_BUY_STORAGE_KEY = "unclozet-group-buy-prototype-v9";
 const listeners = new Set<() => void>();
 let cachedRaw: string | null = null;
 let cached: GroupBuyState | null = null;

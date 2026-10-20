@@ -72,7 +72,7 @@ export function ManualOrderV2({ groupBuy, close }: { groupBuy: GroupBuy; close: 
     footer={<>
       <span className="gbx-modal-total">{priced.quantity ? <>{priced.quantity}개 · 상품 {won(priced.subtotal)} + 배송 {won(priced.shippingFee)}{area ? ` (${remoteAreaLabel(area)})` : ""} = <b>{won(priced.total)}</b></> : "상품을 골라주세요"}</span>
       <button type="button" className="gbx-btn ghost" onClick={close}>취소</button>
-      {overStock ? <button type="button" className="gbx-btn danger" onClick={() => submit(true)}>재고 초과 허용하고 등록</button> : <button type="button" className="gbx-btn primary" disabled={!priced.quantity} onClick={() => submit(false)}>{priced.quantity ? `${won(priced.total)} 주문 등록` : "주문 등록"}</button>}
+      {overStock ? <button type="button" className="gbx-btn danger" onClick={() => submit(true)}>품절 옵션 포함해 등록</button> : <button type="button" className="gbx-btn primary" disabled={!priced.quantity} onClick={() => submit(false)}>{priced.quantity ? `${won(priced.total)} 주문 등록` : "주문 등록"}</button>}
     </>}>
     <div className="gbx-manual">
       <section>
@@ -98,7 +98,7 @@ export function ManualOrderV2({ groupBuy, close }: { groupBuy: GroupBuy; close: 
         {area ? <p className="gbx-help red">{remoteAreaLabel(area)} 주소라 배송비 {won(priced.shippingFee)}이 적용돼요.</p> : null}
       </section>
     </div>
-    {error ? <p className={overStock ? "gbx-warn" : "gbx-error"}>{error}{overStock ? " — 한정 수량을 넘겨 등록하려면 ‘재고 초과 허용하고 등록’을 누르세요." : ""}</p> : null}
+    {error ? <p className={overStock ? "gbx-warn" : "gbx-error"}>{error}{overStock ? " — 그래도 넣으려면 ‘품절 옵션 포함해 등록’을 누르세요." : ""}</p> : null}
   </Modal>;
 }
 

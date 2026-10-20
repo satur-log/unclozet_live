@@ -1,7 +1,7 @@
 "use client";
 
 import { Minus, Plus } from "lucide-react";
-import { remainingStock } from "./pricing";
+import { isSoldOut, remainingStock } from "./pricing";
 import type { Cart } from "./selection";
 import type { GroupBuy } from "./types";
 export type { Cart } from "./selection";
@@ -59,17 +59,18 @@ export function CartPicker({ groupBuy, cart, onChange, compact = false, allowOve
       <header>{!compact ? <ProductThumb name={product.name} imageUrl={product.images[0] ?? ""} /> : null}<h3>{product.name}</h3></header>
       <ul>{product.options.map((option) => {
         const quantity = cart[option.id] ?? 0;
+        // 재고가 모자라도 담을 수 있다(부족분은 추가 발주). 품절 확정만 막고, 관리자는 허용 후 넣을 수 있다.
         const left = remainingStock(option) + (reserved[option.id] ?? 0);
-        const soldOut = left <= 0 && !allowOverStock && quantity === 0;
-        const atMax = !allowOverStock && quantity >= left;
+        const short = option.stockQty == null ? 0 : Math.max(0, quantity - left);
+        const soldOut = isSoldOut(option) && !allowOverStock && quantity === 0;
         return <li key={option.id} className={soldOut ? "sold-out" : ""}>
           <div className="gb-option-label"><strong>{option.name}</strong><span>{won(option.price)}</span>
-            {option.stockQty == null ? null : soldOut ? <em className="out">품절</em> : left <= option.lowStockAlert ? <em className="low">{Number.isFinite(left) ? `${left}개 남음` : ""}</em> : compact ? <em>남은 {left}</em> : null}
+            {isSoldOut(option) ? <em className="out">품절 확정</em> : option.stockQty == null ? null : short > 0 ? <em className="low">재고 부족 {short}</em> : left <= option.lowStockAlert ? <em className="low">{`${left}개 남음`}</em> : compact ? <em>남은 {left}</em> : null}
           </div>
           {soldOut ? <span className="gb-soldout">품절</span> : <div className="gb-stepper" role="group" aria-label={`${product.name} ${option.name} 수량`}>
             <button type="button" aria-label="수량 빼기" disabled={quantity <= 0} onClick={() => set(option.id, quantity - 1)}><Minus /></button>
             <output aria-live="polite">{quantity}</output>
-            <button type="button" aria-label="수량 더하기" disabled={atMax} onClick={() => set(option.id, quantity + 1)}><Plus /></button>
+            <button type="button" aria-label="수량 더하기" onClick={() => set(option.id, quantity + 1)}><Plus /></button>
           </div>}
         </li>;
       })}</ul>
