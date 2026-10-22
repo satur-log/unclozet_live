@@ -322,10 +322,12 @@ function shippingRows(orders: GbOrder[]) {
 }
 
 /** 출력 대기 → 택배 엑셀(라이브방송과 같은 XLSX_HEADER) → 출력 완료 */
-export function exportReadyOrders(state: GroupBuyState, groupBuyId: string, deliver: (bytes: Uint8Array, fileName: string) => void, now = new Date()) {
+/** 출력 대기 주문을 택배 엑셀로 내보낸다. orderIds를 주면 그 주문만(재고 부족 주문은 빼고 보내는 경우). */
+export function exportReadyOrders(state: GroupBuyState, groupBuyId: string, deliver: (bytes: Uint8Array, fileName: string) => void, now = new Date(), orderIds?: string[]) {
   const groupBuy = getGroupBuy(state, groupBuyId);
-  const ready = state.orders.filter((order) => order.groupBuyId === groupBuyId && order.status === "READY" && !order.cancelledAt);
-  if (!ready.length) throw new GroupBuyError("STATE", "출력 대기 주문이 없습니다.");
+  const only = orderIds ? new Set(orderIds) : null;
+  const ready = state.orders.filter((order) => order.groupBuyId === groupBuyId && order.status === "READY" && !order.cancelledAt && (!only || only.has(order.id)));
+  if (!ready.length) throw new GroupBuyError("STATE", only ? "선택한 주문 중 출력 대기 주문이 없습니다." : "출력 대기 주문이 없습니다.");
   deliver(createShippingWorkbook(XLSX_HEADER, shippingRows(ready)), `${safeFileName(groupBuy.title)}-택배-${ready.length}건.xlsx`);
   const ids = new Set(ready.map((order) => order.id));
   return { ...state, orders: state.orders.map((order) => ids.has(order.id) ? { ...order, status: "COMPLETED" as const, exportedAt: iso(now), events: [...order.events, event("READY", "COMPLETED", "admin", "택배 엑셀 출력", now)] } : order) };
@@ -453,6 +455,45 @@ export function readyItemsReport(state: GroupBuyState, groupBuy: GroupBuy): Read
       stockQty: option.stockQty, available, shortage: available == null ? 0 : Math.max(0, readyQty - available), soldOut: isSoldOut(option),
     };
   })).filter((row) => row.readyQty > 0).sort((a, b) => b.shortage - a.shortage || b.readyQty - a.readyQty);
+}
+
+/**
+ * 출력 대기 주문마다 지금 재고로 보낼 수 있는지. 먼저 입금한 주문부터 남은 재고를 배정하고(선입금 우선),
+ * 모자라는 품목이 하나라도 있으면 그 주문은 "재고 부족"으로 본다.
+ */
+export type ReadyAllocation = { shippable: boolean; shortItems: string[] };
+export function readyAllocation(state: GroupBuyState, groupBuy: GroupBuy): Map<string, ReadyAllocation> {
+  const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
+  const left = new Map<string, number>();
+  for (const product of groupBuy.products) for (const option of product.options) {
+    if (option.stockQty == null) continue;
+    const shipped = orders.filter((order) => order.status === "COMPLETED").reduce((sum, order) => sum + order.items.filter((item) => item.optionId === option.id).reduce((s, item) => s + item.quantity, 0), 0);
+    left.set(option.id, Math.max(0, option.stockQty - shipped));
+  }
+  const ready = orders.filter((order) => order.status === "READY").sort((a, b) => (a.paidAt ?? a.createdAt).localeCompare(b.paidAt ?? b.createdAt));
+  const result = new Map<string, ReadyAllocation>();
+  for (const order of ready) {
+    const shortItems = order.items.filter((item) => left.has(item.optionId) && (left.get(item.optionId) ?? 0) < item.quantity).map((item) => item.itemName ?? item.optionName);
+    // 보낼 수 있는 주문만 재고를 차지한다. 못 보내는 주문이 뒤 주문의 몫을 막지 않게.
+    if (!shortItems.length) for (const item of order.items) if (left.has(item.optionId)) left.set(item.optionId, (left.get(item.optionId) ?? 0) - item.quantity);
+    result.set(order.id, { shippable: !shortItems.length, shortItems });
+  }
+  return result;
+}
+
+/** 일자별 출고(택배 엑셀로 내보낸) 수량과 주문 수량. 최근 days일, 오래된 날부터. */
+export type DailyFlow = { date: string; shipped: number; ordered: number };
+export function dailyFlow(state: GroupBuyState, groupBuy: GroupBuy, days = 14, now = new Date()): DailyFlow[] {
+  const day = (value: string | Date) => { const d = new Date(value); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const list: DailyFlow[] = Array.from({ length: days }, (_, i) => ({ date: day(new Date(now.getTime() - (days - 1 - i) * 24 * HOUR)), shipped: 0, ordered: 0 }));
+  const byDate = new Map(list.map((row) => [row.date, row]));
+  for (const order of state.orders) {
+    if (order.groupBuyId !== groupBuy.id || order.cancelledAt) continue;
+    const quantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
+    const ordered = byDate.get(day(order.createdAt)); if (ordered) ordered.ordered += quantity;
+    if (order.exportedAt) { const shipped = byDate.get(day(order.exportedAt)); if (shipped) shipped.shipped += quantity; }
+  }
+  return list;
 }
 
 export function groupBuySummary(state: GroupBuyState, groupBuy: GroupBuy) {

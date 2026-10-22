@@ -183,15 +183,19 @@ function seedPantsDemo(pants: GroupBuy, place: Place, store: { get: () => GroupB
 
   // 2) 상태: 오래된 주문은 입금 → 엑셀 출력 → 송장까지, 최근 주문일수록 입금 전이 많다.
   const EXPORT_AT = 30;
+  const EXPORT_BATCHES = [74, 50, EXPORT_AT];
   const paidAt = new Map<string, number>();
   for (const order of orders) {
     const chance = order.hoursAgo > 30 ? 0.93 : order.hoursAgo > 8 ? 0.75 : 0.3;
     if (random() < chance) paidAt.set(order.id, Math.max(0.2, order.hoursAgo - (0.3 + random() * 8)));
   }
   let state = store.get();
-  const early = [...paidAt].filter(([, hoursAgo]) => hoursAgo > EXPORT_AT);
-  for (const [id, hoursAgo] of early) state = confirmPayments(state, [id], at(hoursAgo));
-  state = exportReadyOrders(state, pants.id, () => undefined, at(EXPORT_AT));
+  const early = [...paidAt].filter(([, hoursAgo]) => hoursAgo > EXPORT_AT).sort((a, b) => b[1] - a[1]);
+  // 택배 엑셀은 며칠에 나눠 뽑은 상황(재고 탭 일자별 출고 그래프용): 3일 전 · 2일 전 · 30시간 전.
+  for (const batchAt of EXPORT_BATCHES) {
+    for (const [id, hoursAgo] of early) if (hoursAgo > batchAt && hoursAgo <= (EXPORT_BATCHES[EXPORT_BATCHES.indexOf(batchAt) - 1] ?? Infinity)) state = confirmPayments(state, [id], at(hoursAgo));
+    state = exportReadyOrders(state, pants.id, () => undefined, at(batchAt));
+  }
   // 송장 엑셀에서 2건은 매칭이 안 된 상황
   const tracked = early.slice(0, Math.max(0, early.length - 2));
   state = setTracking(state, tracked.map(([orderId], index) => ({ orderId, courier: "CJ대한통운", trackingNo: String(680_000_000_000 + index * 7919) })), "excel", at(EXPORT_AT - 3));

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cancelOrder, confirmPayments, deleteGroupBuy, readyItemsReport, restoreGroupBuy, setSoldOut, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
+import { cancelOrder, confirmPayments, dailyFlow, deleteGroupBuy, readyAllocation, readyItemsReport, restoreGroupBuy, setSoldOut, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
 import { createSeedState } from "../app/group-buy/mock";
 import { priceCart } from "../app/group-buy/pricing";
 import { remoteAreaOf } from "../app/group-buy/remote-area";
@@ -233,4 +233,27 @@ test("deleting a group buy removes its orders and stock logs; restore brings the
   assert.equal(back.groupBuys.length, state.groupBuys.length);
   assert.equal(back.orders.length, state.orders.length);
   assert.equal(back.stockLogs.length, state.stockLogs.length);
+});
+
+test("ready orders: first-paid orders get the remaining stock, and only chosen orders are exported", () => {
+  const { state } = base();
+  // 옵션 a 재고 3. 먼저 입금한 2개 주문(2개 + 1개)은 보낼 수 있고, 마지막 2개 주문은 부족.
+  let s = place(state, [{ optionId: "a", quantity: 2 }]).state;
+  s = place(s, [{ optionId: "a", quantity: 2 }]).state;
+  s = place(s, [{ optionId: "a", quantity: 1 }, { optionId: "b", quantity: 1 }]).state;
+  const [first, second, third] = s.orders.map((o) => o.id);
+  s = confirmPayments(s, [first], later(1));
+  s = confirmPayments(s, [third], later(2));
+  s = confirmPayments(s, [second], later(3));
+  const alloc = readyAllocation(s, s.groupBuys[0]);
+  assert.equal(alloc.get(first)!.shippable, true);
+  assert.equal(alloc.get(third)!.shippable, true);
+  assert.deepEqual(alloc.get(second), { shippable: false, shortItems: ["니트 A"] });
+  let files = 0;
+  s = exportReadyOrders(s, "gb", () => { files += 1; }, later(4), [first, third]);
+  assert.equal(files, 1);
+  assert.deepEqual(s.orders.map((o) => o.status), ["COMPLETED", "READY", "COMPLETED"]);
+  const flow = dailyFlow(s, s.groupBuys[0], 3, later(4));
+  assert.equal(flow.at(-1)!.shipped, 4);
+  assert.equal(flow.reduce((sum, row) => sum + row.ordered, 0), 6);
 });
