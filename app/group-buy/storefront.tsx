@@ -104,7 +104,8 @@ export function StoreHomePage({ slug }: { slug: string }) {
   const onlyProduct = groupBuy?.products.length === 1 ? groupBuy.products[0].id : null;
   // 상품이 하나뿐인 공구는 목록 없이 바로 상세로 보낸다.
   useEffect(() => { if (onlyProduct && (groupBuy?.status !== "draft" || preview)) router.replace(productPath(slug, onlyProduct)); }, [onlyProduct, groupBuy?.status, preview, router, slug]);
-  if (!state) return <div className="gb-customer"><ProtoBar /><p className="gb-center-note">불러오는 중…</p></div>;
+  // 상세로 넘어가는 동안 공구 홈을 그리지 않는다(홈 화면이 잠깐 보였다 바뀌는 깜빡임 방지).
+  if (!state || (onlyProduct && (groupBuy?.status !== "draft" || preview))) return <div className="gb-customer"><ProtoBar /><p className="gb-center-note">불러오는 중…</p></div>;
   if (!groupBuy) return <MissingStore />;
   const open = availability(groupBuy, now);
   if (groupBuy.status === "draft" && !preview) return <StoreFrame groupBuy={groupBuy} preview={false} open={open}><div className="gb-view-page"><ClosedNotice groupBuy={groupBuy} reason="draft" /></div></StoreFrame>;

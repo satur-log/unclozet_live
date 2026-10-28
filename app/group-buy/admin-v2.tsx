@@ -17,7 +17,7 @@ import { priceCart } from "./pricing";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
 import { resetGroupBuyState, updateGroupBuyState, useGroupBuyState } from "./store";
 import type { GbOrder, GbProduct, GroupBuy, GroupBuyState } from "./types";
-import { absoluteUrl, adminPath, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, ProductThumb, type Cart, won } from "./ui";
+import { absoluteUrl, adminPath, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, productPath, ProductThumb, type Cart, won } from "./ui";
 import { axesFor } from "./variants";
 import "./group-buy.css";
 import "./admin-v2.css";
@@ -131,7 +131,7 @@ function DetailPage({ state, groupBuyId, initialTab }: { state: GroupBuyState; g
       </div>
       <div className="gbx-head-actions">
         <button type="button" className="gbx-btn" onClick={() => copy(absoluteUrl(orderFormPath(groupBuy.slug)), "주문서 링크")}><Link2 />주문서 링크 복사</button>
-        <a className="gbx-btn" href={`${orderFormPath(groupBuy.slug)}?preview=1`} target="_blank" rel="noreferrer">고객 화면<ArrowUpRight /></a>
+        <a className="gbx-btn" href={`${groupBuy.products.length === 1 ? productPath(groupBuy.slug, groupBuy.products[0].id) : orderFormPath(groupBuy.slug)}?preview=1`} target="_blank" rel="noreferrer">고객 화면<ArrowUpRight /></a>
       </div>
     </header>
     <nav className="gbx-tabs" role="tablist" aria-label="공구 메뉴">
