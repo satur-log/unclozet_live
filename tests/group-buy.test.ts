@@ -257,3 +257,13 @@ test("ready orders: first-paid orders get the remaining stock, and only chosen o
   assert.equal(flow.at(-1)!.shipped, 4);
   assert.equal(flow.reduce((sum, row) => sum + row.ordered, 0), 6);
 });
+
+test("CJ대한통운 송장 양식: 보내는분 칸을 건너뛰고 받는분 이름·전화번호를 고른다", () => {
+  const header = ["No", "", "선택", "접수\r\n순서", "예약\r\n구분", "상태", "집화예정일자", "운송장번호", "집화예정점소", "보내는분", "보내는분전화번호", "운임\r\n구분", "박스\r\n타입", "수량", "내품수량", "기본운임", "기타운임", "운임합계", "고객주문번호", "배송계획점소", "받는분", "받는분전화번호", "받는분우편번호", "받는분주소", "상품코드", "상품명"];
+  const row = header.map(() => "");
+  row[7] = "6932-1211-5690"; row[9] = "언클로젯"; row[10] = "010-0000-0000"; row[20] = "홍 길동"; row[21] = "01012345678";
+  const detected = detectTrackingColumns([header, row]);
+  assert.deepEqual(detected?.columns, { name: 20, phone: 21, trackingNo: 7, courier: null });
+  const [parsed] = trackingRowsFrom([header, row], detected!.headerRow, detected!.columns, "CJ대한통운");
+  assert.deepEqual([parsed.name, parsed.phone, parsed.trackingNo, parsed.courier], ["홍 길동", "01012345678", "6932-1211-5690", "CJ대한통운"]);
+});

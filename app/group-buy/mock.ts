@@ -196,9 +196,10 @@ function seedPantsDemo(pants: GroupBuy, place: Place, store: { get: () => GroupB
     for (const [id, hoursAgo] of early) if (hoursAgo > batchAt && hoursAgo <= (EXPORT_BATCHES[EXPORT_BATCHES.indexOf(batchAt) - 1] ?? Infinity)) state = confirmPayments(state, [id], at(hoursAgo));
     state = exportReadyOrders(state, pants.id, () => undefined, at(batchAt));
   }
-  // 송장 엑셀에서 2건은 매칭이 안 된 상황
-  const tracked = early.slice(0, Math.max(0, early.length - 2));
-  state = setTracking(state, tracked.map(([orderId], index) => ({ orderId, courier: "CJ대한통운", trackingNo: String(680_000_000_000 + index * 7919) })), "excel", at(EXPORT_AT - 3));
+  // 송장: 앞의 두 번은 송장까지 등록(2건은 매칭 안 된 상황), 마지막 출력분은 아직 송장 대기 → 송장 엑셀 업로드 테스트용
+  const shippedEarly = early.filter(([, hoursAgo]) => hoursAgo > EXPORT_BATCHES[1]);
+  const tracked = shippedEarly.slice(0, Math.max(0, shippedEarly.length - 2));
+  state = setTracking(state, tracked.map(([orderId], index) => ({ orderId, courier: "CJ대한통운", trackingNo: `6932-1211-${String(5000 + index * 11).padStart(4, "0")}` })), "excel", at(EXPORT_BATCHES[1] - 3));
   for (const [id, hoursAgo] of paidAt) if (hoursAgo <= EXPORT_AT) state = confirmPayments(state, [id], at(hoursAgo));
 
   // 3) 예외 몇 건: 고객 요청 취소, 입금액 부족 안내.

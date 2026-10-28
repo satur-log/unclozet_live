@@ -372,10 +372,12 @@ export type TrackingColumns = { name: number; phone: number; trackingNo: number;
 export function detectTrackingColumns(rows: string[][]): { headerRow: number; columns: TrackingColumns } | null {
   for (let r = 0; r < Math.min(rows.length, 10); r += 1) {
     const cells = rows[r].map((cell) => String(cell ?? "").replace(/\s+/g, "").toLowerCase());
-    const find = (aliases: readonly string[]) => { for (const alias of aliases) { const index = cells.findIndex((cell) => cell.includes(alias.toLowerCase())); if (index >= 0) return index; } return -1; };
+    // CJ대한통운 양식처럼 보내는분(가게) 이름·전화번호 칸이 받는분보다 앞에 있으면 그 칸은 건너뛴다.
+    const sender = (cell: string) => /보내는|송하인|발송인|보내는사람/.test(cell);
+    const find = (aliases: readonly string[], skip = -1) => { for (const alias of aliases) { const index = cells.findIndex((cell, i) => i !== skip && !sender(cell) && cell.includes(alias.toLowerCase())); if (index >= 0) return index; } return -1; };
     const trackingNo = find(headerAliases.trackingNo);
     const name = find(headerAliases.name);
-    const phone = cells.findIndex((cell, index) => index !== name && headerAliases.phone.some((alias) => cell.includes(alias)));
+    const phone = find(headerAliases.phone, name);
     if (trackingNo >= 0 && name >= 0 && phone >= 0) {
       const courier = find(headerAliases.courier);
       return { headerRow: r, columns: { name, phone, trackingNo, courier: courier >= 0 ? courier : null } };

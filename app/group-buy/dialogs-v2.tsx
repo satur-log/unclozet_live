@@ -104,6 +104,9 @@ export function ManualOrderV2({ groupBuy, close }: { groupBuy: GroupBuy; close: 
 
 // ── 송장 엑셀 가져오기 ───────────────────────────────────
 
+/** CJ대한통운(cnplus) 송장 출력 엑셀의 머리글. 실제 파일과 같은 순서. */
+const CJ_TRACKING_HEADER = ["No", "", "선택", "접수\r\n순서", "예약\r\n구분", "상태", "집화예정일자", "운송장번호", "집화예정점소", "보내는분", "보내는분전화번호", "운임\r\n구분", "박스\r\n타입", "수량", "내품수량", "기본운임", "기타운임", "운임합계", "고객주문번호", "배송계획점소", "받는분", "받는분전화번호", "받는분우편번호", "받는분주소", "상품코드", "상품명", "단품코드", "단품명", "배송메시지", "기타1", "기타2", "기타3", "기타4", "기타5", "기타6", "기타7", "기타8", "기타9", "기타10", "휴일배송"];
+
 type Sheet = { fileName: string; rows: string[][]; headerRow: number; columns: TrackingColumns };
 
 export function TrackingImportV2({ state, groupBuy, close }: { state: GroupBuyState; groupBuy: GroupBuy; close: () => void }) {
@@ -137,12 +140,26 @@ export function TrackingImportV2({ state, groupBuy, close }: { state: GroupBuySt
     finally { if (inputRef.current) inputRef.current.value = ""; }
   }
 
-  /** 테스트용: 송장 대기 주문으로 택배사 송장 엑셀을 흉내 낸다(일부러 매칭 안 되는 행 1개 포함). */
+  /**
+   * 테스트용: 송장 대기 주문으로 CJ대한통운 송장 엑셀(실제 양식과 같은 40칸)을 흉내 낸다.
+   * 일부러 섞는 경우: 이름 띄어쓰기 다름, 전화번호 하이픈 없음, 연결할 주문이 없는 행.
+   */
   function sampleFile() {
-    const rows = completed.filter((order) => !order.trackingNo).map((order, index) => [order.recipientName, order.recipientPhone, `5${String(Date.now()).slice(-7)}${String(index).padStart(4, "0")}`, "CJ대한통운", order.address]);
-    if (!rows.length) { setError("송장 대기 주문이 없어요. 먼저 택배 엑셀을 출력하세요."); return; }
-    rows.push(["없는고객", "010-0000-0000", `5${String(Date.now()).slice(-7)}9999`, "CJ대한통운", "테스트 주소"]);
-    downloadBytes(createWorkbook([{ name: "운송장", rows: [["수하인명", "수하인전화번호", "운송장번호", "택배사", "주소"], ...rows] }]), `샘플-택배사-송장-${rows.length}행.xlsx`);
+    const waiting = completed.filter((order) => !order.trackingNo);
+    if (!waiting.length) { setError("송장 대기 주문이 없어요. 먼저 택배 엑셀을 출력하세요."); return; }
+    const day = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+    const serial = Math.floor(Date.now() / 1000) % 10000;
+    const row = (index: number, name: string, phone: string, postcode: string, address: string, item: string) => {
+      const no = `6932-${String(serial).padStart(4, "0")}-${String(1000 + index * 11).padStart(4, "0")}`;
+      return [String(index + 1), "", "0", String(index + 1), "일반", "출력확정", day, no, "대구북구금호(339A)", "언클로젯", "010-0000-0000", "신용", "극소", "1", "1", "2500", "0", "2500", "", "", name, phone, postcode, address, "", item, "", "", "", ...Array(10).fill(""), "제공"];
+    };
+    const rows = waiting.map((order, index) => {
+      const name = index === 1 && order.recipientName.length > 1 ? `${order.recipientName[0]} ${order.recipientName.slice(1)}` : order.recipientName;
+      const phone = index === 2 ? order.recipientPhone.replace(/\D/g, "") : order.recipientPhone;
+      return row(index, name, phone, order.postcode, `${order.address} ${order.addressDetail}`.trim(), order.items.map((item) => `${item.itemName ?? item.optionName} ${item.quantity}`).join(", "));
+    });
+    rows.push(row(rows.length, "없는고객", "010-0000-1234", "00000", "테스트 주소", "연결 안 되는 행"));
+    downloadBytes(createWorkbook([{ name: "Sheet1", rows: [CJ_TRACKING_HEADER, ...rows] }]), `샘플-CJ송장-${rows.length}행.xlsx`);
   }
 
   function confirm() {
