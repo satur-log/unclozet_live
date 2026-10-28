@@ -504,17 +504,44 @@ export function groupBuySummary(state: GroupBuyState, groupBuy: GroupBuy) {
   return { orders: orders.length, waiting: orders.filter((order) => order.status === "WAITING").length, revenue: orders.reduce((sum, order) => sum + order.total, 0), lowStock };
 }
 
+/** 관리 화면의 주문 단계. 출력 완료를 송장 유무로 나눠 "다음에 할 일" 기준으로 본다. */
+export type OrderStage = "waiting" | "ready" | "tracking" | "shipped" | "cancelled";
+export function orderStage(order: GbOrder): OrderStage {
+  if (order.cancelledAt) return "cancelled";
+  if (order.status === "WAITING") return "waiting";
+  if (order.status === "READY") return "ready";
+  return order.trackingNo ? "shipped" : "tracking";
+}
+export const ORDER_STAGE_LABEL: Record<OrderStage, string> = { waiting: "입금 대기", ready: "출력 대기", tracking: "송장 대기", shipped: "발송 완료", cancelled: "취소" };
+
+/** 엑셀용 한국 시간 "2026-10-24 16:18". 기기 시간대와 상관없이 KST로 적는다. */
+export function kstDateTime(value: string | null) {
+  if (!value) return "";
+  const date = new Date(new Date(value).getTime() + 9 * HOUR);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 16).replace("T", " ");
+}
+
+/** 전체 주문 엑셀(최종 보관용). 상태는 화면과 같은 이름, 날짜는 한국 시간. */
 export function allOrdersWorkbook(state: GroupBuyState, groupBuyId: string) {
   const groupBuy = getGroupBuy(state, groupBuyId);
   const orders = state.orders.filter((order) => order.groupBuyId === groupBuyId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const header = ["주문번호", "주문일시", "접수 경로", "상태", "주문자", "휴대폰", "입금자명", "받는 분", "받는 분 연락처", "우편번호", "주소", "배송 메시지", "품목", "상품 금액", "배송비", "할인", "최종 금액", "입금 확인 일시", "택배사", "송장번호", "판매자 메모"];
-  const rows = orders.map((order) => [order.orderNo, order.createdAt, order.source === "form" ? "주문서" : "수기", order.cancelledAt ? "취소" : statusLabels[order.status], order.customerName, order.phone, order.depositorName, order.recipientName, order.recipientPhone, order.postcode, `${order.address} ${order.addressDetail}`.trim(), order.shippingMessage, itemLabel(order), order.subtotal, order.shippingFee, order.discount, order.total, order.paidAt ?? "", order.courier, order.trackingNo, order.sellerNote]);
-  const stock = stockReport(state, groupBuy);
-  const stockHeader = ["상품", "옵션", "단가", "전체 재고", "입금 전 수량", "입금 확인 수량", "주문 합계", "남은 재고", "부족(추가 발주)", "품절 확정"];
-  const stockRows = stock.map((row) => [row.productName, row.optionName, row.price, row.stockQty ?? "무제한", row.waitingQty, row.paidQty, row.waitingQty + row.paidQty, row.stockQty == null ? "무제한" : row.remaining, row.shortage, row.soldOut ? "품절" : ""]);
+  const header = ["주문번호", "주문일시", "접수 경로", "상태", "주문자", "휴대폰", "입금자명", "받는 분", "받는 분 연락처", "우편번호", "주소", "배송 메시지", "품목", "상품 금액", "배송비", "할인", "최종 금액", "입금 확인 일시", "택배 엑셀 출력 일시", "택배사", "송장번호", "취소 일시", "판매자 메모"];
+  const rows = orders.map((order) => [order.orderNo, kstDateTime(order.createdAt), order.source === "form" ? "주문서" : "수기", ORDER_STAGE_LABEL[orderStage(order)], order.customerName, order.phone, order.depositorName, order.recipientName, order.recipientPhone, order.postcode, `${order.address} ${order.addressDetail}`.trim(), order.shippingMessage, itemLabel(order), order.subtotal, order.shippingFee, order.discount, order.total, kstDateTime(order.paidAt), kstDateTime(order.exportedAt), order.courier, order.trackingNo, kstDateTime(order.cancelledAt), order.sellerNote]);
   return {
-    bytes: createWorkbook([{ name: "주문", rows: [header, ...rows] }, { name: "옵션별 집계", rows: [stockHeader, ...stockRows] }]),
+    bytes: createWorkbook([{ name: "주문", rows: [header, ...rows] }]),
     fileName: `${safeFileName(groupBuy.title)}-전체주문-${orders.length}건.xlsx`,
+  };
+}
+
+/** 재고 탭 엑셀: 옵션별 재고·주문·부족 집계. */
+export function stockWorkbook(state: GroupBuyState, groupBuyId: string, now = new Date()) {
+  const groupBuy = getGroupBuy(state, groupBuyId);
+  const header = ["상품", "옵션", "단가", "전체 재고", "입금 전 수량", "입금 확인 수량", "주문 합계", "남은 재고", "부족(추가 발주)", "상태"];
+  const label = { unlimited: "무제한", ok: "충분", low: "얼마 안 남음", short: "부족", out: "품절 확정" } as const;
+  const rows = stockReport(state, groupBuy).map((row) => [row.productName, row.optionName, row.price, row.stockQty ?? "무제한", row.waitingQty, row.paidQty, row.waitingQty + row.paidQty, row.stockQty == null ? "무제한" : row.remaining, row.shortage, label[row.level]]);
+  return {
+    bytes: createWorkbook([{ name: "옵션별 재고", rows: [header, ...rows] }]),
+    fileName: `${safeFileName(groupBuy.title)}-재고-${kstDateTime(now.toISOString()).slice(0, 10)}.xlsx`,
   };
 }
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cancelOrder, confirmPayments, dailyFlow, deleteGroupBuy, readyAllocation, readyItemsReport, restoreGroupBuy, setSoldOut, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
+import readXlsxFile from "read-excel-file/node";
+import { allOrdersWorkbook, kstDateTime, stockWorkbook, cancelOrder, confirmPayments, dailyFlow, deleteGroupBuy, readyAllocation, readyItemsReport, restoreGroupBuy, setSoldOut, detectTrackingColumns, editOrderItems, exportReadyOrders, lookupOrders, matchTrackingRows, revertPayment, saveGroupBuy, stockReport, submitOrder, trackingRowsFrom } from "../app/group-buy/model";
 import { createSeedState } from "../app/group-buy/mock";
 import { priceCart } from "../app/group-buy/pricing";
 import { remoteAreaOf } from "../app/group-buy/remote-area";
@@ -266,4 +267,17 @@ test("CJ대한통운 송장 양식: 보내는분 칸을 건너뛰고 받는분 �
   assert.deepEqual(detected?.columns, { name: 20, phone: 21, trackingNo: 7, courier: null });
   const [parsed] = trackingRowsFrom([header, row], detected!.headerRow, detected!.columns, "CJ대한통운");
   assert.deepEqual([parsed.name, parsed.phone, parsed.trackingNo, parsed.courier], ["홍 길동", "01012345678", "6932-1211-5690", "CJ대한통운"]);
+});
+
+test("전체 주문 엑셀: 한국 시간, 화면과 같은 상태 이름, 재고 집계는 재고 엑셀로", async () => {
+  assert.equal(kstDateTime("2026-10-24T15:18:52.341Z"), "2026-10-25 00:18");
+  const state = createSeedState();
+  const sheets = await readXlsxFile(Buffer.from(allOrdersWorkbook(state, "gb-magic-pants").bytes));
+  assert.equal(sheets.length, 1);
+  const [header, ...rows] = sheets[0].data;
+  const status = header.indexOf("상태");
+  assert.deepEqual([...new Set(rows.map((row) => row[status]))].sort(), ["발송 완료", "송장 대기", "입금 대기", "출력 대기", "취소"].sort());
+  assert.match(String(rows[0][header.indexOf("주문일시")]), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  const stock = await readXlsxFile(Buffer.from(stockWorkbook(state, "gb-magic-pants").bytes));
+  assert.equal(stock[0].data[0][0], "상품");
 });

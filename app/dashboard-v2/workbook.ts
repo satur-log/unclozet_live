@@ -32,6 +32,11 @@ function pushUInt32(target: number[], value: number) {
   target.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
 }
 
+// 스프레드(push(...bytes))는 시트가 커지면 호출 스택을 넘친다. 한 바이트씩 넣는다.
+function pushBytes(target: number[], bytes: ArrayLike<number>) {
+  for (let i = 0; i < bytes.length; i += 1) target.push(bytes[i]);
+}
+
 function createZip(entries: Array<{ name: string; content: string }>) {
   const output: number[] = [];
   const centralDirectory: number[] = [];
@@ -56,7 +61,8 @@ function createZip(entries: Array<{ name: string; content: string }>) {
     pushUInt32(output, contentBytes.length);
     pushUInt16(output, nameBytes.length);
     pushUInt16(output, 0);
-    output.push(...nameBytes, ...contentBytes);
+    pushBytes(output, nameBytes);
+    pushBytes(output, contentBytes);
 
     pushUInt32(centralDirectory, 0x02014b50);
     pushUInt16(centralDirectory, 20);
@@ -75,11 +81,11 @@ function createZip(entries: Array<{ name: string; content: string }>) {
     pushUInt16(centralDirectory, 0);
     pushUInt32(centralDirectory, 0);
     pushUInt32(centralDirectory, offset);
-    centralDirectory.push(...nameBytes);
+    pushBytes(centralDirectory, nameBytes);
   });
 
   const centralDirectoryOffset = output.length;
-  output.push(...centralDirectory);
+  pushBytes(output, centralDirectory);
   pushUInt32(output, 0x06054b50);
   pushUInt16(output, 0);
   pushUInt16(output, 0);

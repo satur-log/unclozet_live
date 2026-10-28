@@ -7,7 +7,7 @@ import { takeDeletedGroupBuy, ToastContext, useCopy, useRun, type Toast } from "
 import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, CopyPlus, Download, Link2, MessageSquareText, Minus, Plus, RotateCcw, Search, Truck, Upload, X } from "lucide-react";
 import { Shell } from "../dashboard-v2/shell";
 import {
-  adjustStock, allOrdersWorkbook, cancelOrder, confirmPayments, COURIERS, createGroupBuy, differenceSmsText, duplicateGroupBuy, editOrderDelivery, editOrderItems, exportReadyOrders,
+  adjustStock, allOrdersWorkbook, ORDER_STAGE_LABEL, orderStage, stockWorkbook, type OrderStage, cancelOrder, confirmPayments, COURIERS, createGroupBuy, differenceSmsText, duplicateGroupBuy, editOrderDelivery, editOrderItems, exportReadyOrders,
   groupBuyStatusLabels, paymentGuideText, reexportOrders, resetLookupPin, restoreGroupBuy, revertPayment, setSellerNote, setTracking, smsHref, statusLabels, stockReport,
   dailyFlow, GroupBuyError, readyAllocation, readyItemsReport, setSoldOut, trackingUrl, type DeliveryFields, type ReadyItemRow, type StockRow,
 } from "./model";
@@ -27,15 +27,9 @@ import "./admin-v2.css";
 
 // ── 공통 조각 ────────────────────────────────────────────
 
-type Stage = "waiting" | "ready" | "tracking" | "shipped" | "cancelled";
-/** 출력 완료를 송장 유무로 나눠, 판매자가 "다음에 할 일" 기준으로 볼 수 있게 한다. */
-function stageOf(order: GbOrder): Stage {
-  if (order.cancelledAt) return "cancelled";
-  if (order.status === "WAITING") return "waiting";
-  if (order.status === "READY") return "ready";
-  return order.trackingNo ? "shipped" : "tracking";
-}
-const STAGE_LABEL: Record<Stage, string> = { waiting: "입금 대기", ready: "출력 대기", tracking: "송장 대기", shipped: "발송 완료", cancelled: "취소" };
+type Stage = OrderStage;
+const stageOf = orderStage;
+const STAGE_LABEL = ORDER_STAGE_LABEL;
 
 /** 입금 기한이 지난 입금 대기는 같은 글자에 빨간 바탕으로 구분한다. */
 function StagePill({ stage, late = false }: { stage: Stage; late?: boolean }) {
@@ -245,7 +239,7 @@ function OrdersView({ state, groupBuy }: { state: GroupBuyState; groupBuy: Group
       <label className="gbx-search"><Search /><input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="입금자명 · 주문자 · 금액 · 주문번호 · 전화 뒷자리" aria-label="주문 검색" />{query ? <button type="button" aria-label="검색어 지우기" onClick={() => setQuery("")}><X /></button> : <kbd>/</kbd>}</label>
       <div className="gbx-toolbar-actions">
         <button type="button" className="gbx-btn" onClick={() => setManualOpen(true)}><Plus />수기 주문</button>
-        <button type="button" className="gbx-btn" onClick={exportAll} title="정산·발주용 전체 주문 + 옵션별 집계"><Download />전체 엑셀</button>
+        <button type="button" className="gbx-btn" onClick={exportAll} title="전체 주문 보관용 엑셀 (상태 칸으로 걸러 보세요)"><Download />전체 엑셀</button>
       </div>
     </div>
     <div className="gbx-filters">
@@ -640,6 +634,7 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
         <div><h3>옵션별 재고</h3><p>줄을 누르면 수량 조정 · 품절 확정</p></div>
         <div className="gbx-stock-tools">
           <label className="gbx-search sm"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="옵션 검색 (예: 슬림 롱)" aria-label="옵션 검색" />{query ? <button type="button" aria-label="검색어 지우기" onClick={() => setQuery("")}><X /></button> : null}</label>
+          <button type="button" className="gbx-btn sm" onClick={() => { try { const { bytes, fileName } = stockWorkbook(state, groupBuy.id); downloadBytes(bytes, fileName); } catch (error) { run(() => { throw error; }); } }}><Download />재고 엑셀</button>
           <div className="gbx-seg" role="tablist" aria-label="보기 방식">{([["list", "목록"], ["grid", "옵션 표"]] as const).map(([key, name]) => <button key={key} type="button" role="tab" aria-selected={layout === key} className={layout === key ? "active" : ""} onClick={() => setLayout(key)}>{name}</button>)}</div>
         </div>
       </header>

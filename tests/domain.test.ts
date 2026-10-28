@@ -5,7 +5,7 @@ import { analyzeSettlement } from "../app/dashboard-v2/settlement";
 import { normalizePhoneNumber, parseKakaoOrder } from "../app/dashboard-v2/shipping-parser";
 import { parseCustomerWorkbookRows } from "../app/dashboard-v2/customer-import";
 import { mergeLegacyData } from "../app/dashboard-v2/legacy-import";
-import { createShippingWorkbook } from "../app/dashboard-v2/workbook";
+import { createShippingWorkbook, createWorkbook } from "../app/dashboard-v2/workbook";
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
   deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
@@ -383,4 +383,11 @@ test("a settlement line with a wrong separator is reported, and fixing it links 
   assert.notEqual(orphan.settlementId, null);
   assert.equal(orphan.status, "READY");
   assert.equal(state.customers.some((customer) => customer.instagramId === "nadoo_nadoo_"), true);
+});
+
+test("큰 엑셀도 만든다 (바이트를 한 번에 펼치면 호출 스택이 넘친다)", async () => {
+  const rows = Array.from({ length: 3000 }, (_, index) => [`주문 ${index}`, "서울특별시 강남구 테헤란로 123 101동 1001호", "010-1234-5678", "슬림 롱 FREE 블랙 1, 와이드 L 멜란지 2"]);
+  const bytes = createWorkbook([{ name: "주문", rows: [["주문", "주소", "전화", "품목"], ...rows] }]);
+  const sheets = await readXlsxFile(Buffer.from(bytes));
+  assert.equal(sheets[0].data.length, 3001);
 });
