@@ -5,10 +5,10 @@ import readXlsxFile from "read-excel-file/browser";
 import { Check, Copy, Download, FileSpreadsheet, Upload, X } from "lucide-react";
 import { createWorkbook } from "../dashboard-v2/workbook";
 import { useCopy, useRun } from "./admin-v2-shared";
-import { COURIERS, detectTrackingColumns, matchTrackingRows, paymentGuideText, setTracking, submitOrder, trackingRowsFrom, type SubmitResult, type TrackingColumns, type TrackingMatch } from "./model";
+import { COURIERS, detectTrackingColumns, matchTrackingRows, paymentGuideText, setTracking, trackingRowsFrom, type TrackingColumns, type TrackingMatch } from "./model";
 import { priceCart } from "./pricing";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
-import { updateGroupBuyState } from "./store";
+import { submitAdminOrder } from "./store";
 import type { CustomerInput, GbOrder, GroupBuy, GroupBuyState } from "./types";
 import { absoluteUrl, CartPicker, cartLines, downloadBytes, formatPhoneInput, lookupPath, won, type Cart } from "./ui";
 
@@ -46,14 +46,18 @@ export function ManualOrderV2({ groupBuy, close }: { groupBuy: GroupBuy; close: 
   const [error, setError] = useState("");
   const [overStock, setOverStock] = useState(false);
   const [created, setCreated] = useState<GbOrder | null>(null);
+  const [saving, setSaving] = useState(false);
   const priced = priceCart(groupBuy, cartLines(cart), input.postcode, input.address);
   const area = remoteAreaOf(input.postcode, input.address);
   const set = (key: keyof ManualInput, value: string) => { setInput((current) => ({ ...current, [key]: value, ...(key === "customerName" && current.depositorName === current.customerName ? { depositorName: value } : {}) })); setError(""); };
 
-  function submit(allow: boolean) {
+  async function submit(allow: boolean) {
     const digits = input.phone.replace(/\D/g, "");
     const data: CustomerInput = { ...input, ...(same ? { recipientName: input.customerName, recipientPhone: input.phone } : {}), depositorName: input.depositorName || input.customerName, pin: digits.slice(-4) };
-    const result = updateGroupBuyState<SubmitResult>((current) => { const outcome = submitOrder(current, { groupBuyId: groupBuy.id, lines: cartLines(cart), input: data, expectedTotal: null, source: "manual", allowOverStock: allow }); return { state: outcome.ok ? outcome.state : current, value: outcome }; })!;
+    setSaving(true);
+    // 주문번호는 서버가 매긴다(고객 주문과 겹치지 않게).
+    const result = await submitAdminOrder({ groupBuyId: groupBuy.id, lines: cartLines(cart), input: data, expectedTotal: null, source: "manual", allowOverStock: allow }).catch((failure: unknown) => ({ ok: false as const, code: "INVALID" as const, message: failure instanceof Error ? failure.message : "등록하지 못했어요." }));
+    setSaving(false);
     if (result.ok) { setCreated(result.order); return; }
     if (result.code === "STOCK") { setOverStock(true); setError(result.message); return; }
     setError(result.message);
@@ -72,7 +76,7 @@ export function ManualOrderV2({ groupBuy, close }: { groupBuy: GroupBuy; close: 
     footer={<>
       <span className="gbx-modal-total">{priced.quantity ? <>{priced.quantity}개 · 상품 {won(priced.subtotal)} + 배송 {won(priced.shippingFee)}{area ? ` (${remoteAreaLabel(area)})` : ""} = <b>{won(priced.total)}</b></> : "상품을 골라주세요"}</span>
       <button type="button" className="gbx-btn ghost" onClick={close}>취소</button>
-      {overStock ? <button type="button" className="gbx-btn danger" onClick={() => submit(true)}>품절 옵션 포함해 등록</button> : <button type="button" className="gbx-btn primary" disabled={!priced.quantity} onClick={() => submit(false)}>{priced.quantity ? `${won(priced.total)} 주문 등록` : "주문 등록"}</button>}
+      {overStock ? <button type="button" className="gbx-btn danger" disabled={saving} onClick={() => void submit(true)}>품절 옵션 포함해 등록</button> : <button type="button" className="gbx-btn primary" disabled={!priced.quantity || saving} onClick={() => void submit(false)}>{saving ? "등록 중…" : priced.quantity ? `${won(priced.total)} 주문 등록` : "주문 등록"}</button>}
     </>}>
     <div className="gbx-manual">
       <section>

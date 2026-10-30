@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { DetailBlock, GbOption, GbProduct } from "./types";
+import { uploadGroupBuyImage } from "./store";
 import { productPath } from "./ui";
 
 const newId = () => crypto.randomUUID();
@@ -16,7 +17,8 @@ const move = <T,>(list: T[], index: number, delta: number) => { const next = [..
  * 프로토타입은 이미지를 localStorage에 넣으므로 업로드 시 긴 변 1200px JPEG로 줄인다.
  * 운영에서는 Supabase Storage에 올리고 URL만 저장한다.
  */
-export async function imageFileToDataUrl(file: File, maxSide = 1200) {
+/** 이미지를 1200px·JPEG로 줄여 서버(Supabase Storage)에 올리고 주소를 돌려준다. */
+export async function uploadProductImage(file: File, maxSide = 1200) {
   if (!file.type.startsWith("image/")) throw new Error("이미지 파일만 올릴 수 있습니다.");
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -29,7 +31,9 @@ export async function imageFileToDataUrl(file: File, maxSide = 1200) {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.8);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+  if (!blob) throw new Error("이미지를 처리하지 못했습니다.");
+  return uploadGroupBuyImage(blob);
 }
 
 function ImagePicker({ onAdd, label, onError }: { onAdd: (urls: string[]) => void; label: string; onError: (message: string) => void }) {
@@ -38,7 +42,7 @@ function ImagePicker({ onAdd, label, onError }: { onAdd: (urls: string[]) => voi
   const [busy, setBusy] = useState(false);
   async function upload(files: FileList) {
     setBusy(true);
-    try { onAdd(await Promise.all([...files].map((file) => imageFileToDataUrl(file)))); }
+    try { onAdd(await Promise.all([...files].map((file) => uploadProductImage(file)))); }
     catch (error) { onError(error instanceof Error ? error.message : "이미지를 읽지 못했습니다."); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ""; }
   }

@@ -6,9 +6,9 @@ import { stashDeletedGroupBuy, ToastContext, useCopy, useRun } from "./admin-v2-
 import { deleteGroupBuy, saveGroupBuy } from "./model";
 import { useRouter } from "next/navigation";
 import { OptionsEditor, SizeChartEditor } from "./options-v2";
-import { imageFileToDataUrl } from "./product-editor";
+import { uploadProductImage } from "./product-editor";
 import type { DetailBlock, GbProduct, GroupBuy, GroupBuyState } from "./types";
-import { absoluteUrl, adminPath, orderFormPath, won } from "./ui";
+import { absoluteUrl, orderFormPath, useAdminPath, won } from "./ui";
 
 // 공구 관리 v2 설정. 고객이 보는 순서대로 묶었다:
 // 기본 정보(상세 상단) → 상품 옵션 → 상세페이지(본문·배송 안내) → 주문 안내(주문서·완료 화면·입금 계좌).
@@ -95,7 +95,7 @@ function AutoTextarea({ value, onChange, placeholder, minRows = 3 }: { value: st
   return <textarea ref={ref} rows={minRows} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
 }
 
-/** 이미지 파일 선택 → 1200px JPEG로 줄여 data URL로 돌려준다(프로토타입 저장용). */
+/** 이미지 파일 선택 → 1200px JPEG로 줄여 서버(Supabase Storage)에 올리고 주소를 돌려준다. */
 function useImagePicker(onPicked: (urls: string[]) => void) {
   const toast = useContext(ToastContext);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -104,7 +104,7 @@ function useImagePicker(onPicked: (urls: string[]) => void) {
     const files = [...(e.target.files ?? [])];
     if (!files.length) return;
     setBusy(true);
-    try { onPicked(await Promise.all(files.map((file) => imageFileToDataUrl(file)))); }
+    try { onPicked(await Promise.all(files.map((file) => uploadProductImage(file)))); }
     catch (error) { toast({ message: error instanceof Error ? error.message : "이미지를 읽지 못했어요.", error: true }); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ""; }
   }} />;
@@ -168,6 +168,7 @@ function BlocksEditor({ blocks, onChange }: { blocks: DetailBlock[]; onChange: (
 
 /** 자주 쓰지 않는 기능이라 설정 맨 아래에 작게 둔다. 지운 직후 토스트로 되돌릴 수 있다. */
 function DeleteGroupBuy({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupBuy }) {
+  const adminPath = useAdminPath();
   const run = useRun();
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);

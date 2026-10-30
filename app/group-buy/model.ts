@@ -102,7 +102,9 @@ function soldOutLines(groupBuy: GroupBuy, deltas: Map<string, number>) {
 
 function nextOrderNo(state: GroupBuyState, now: Date) {
   const seq = state.orderSeq + 1;
-  const mmdd = `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  // 서버(Vercel)는 UTC라 한국 날짜로 맞춘다.
+  const kst = new Date(now.getTime() + 9 * HOUR);
+  const mmdd = `${String(kst.getUTCMonth() + 1).padStart(2, "0")}${String(kst.getUTCDate()).padStart(2, "0")}`;
   return { seq, orderNo: `GB-${mmdd}-${String(seq).padStart(4, "0")}` };
 }
 

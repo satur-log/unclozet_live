@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ReceiptText } from "lucide-react";
 import { availability, groupBuyBySlug, type Availability } from "./model";
 import { isSoldOut } from "./pricing";
-import { useGroupBuyState } from "./store";
+import { usePublicGroupBuy } from "./public-store";
 import type { GbProduct, GroupBuy } from "./types";
 import { adminPath, longDateTime, lookupPath, orderFormPath, ProductThumb, productPath, won } from "./ui";
 import "./group-buy.css";
@@ -15,7 +15,7 @@ import "./group-buy.css";
 // 장바구니는 없다. 같은 공구의 다른 상품은 상세에서 "추가 상품"으로 함께 주문해 배송비를 한 번만 낸다.
 
 export function ProtoBar() {
-  return <div className="gb-proto-bar"><span>프로토타입 · 이 브라우저에만 저장</span><Link href={adminPath()}>관리자 화면 →</Link></div>;
+  return <div className="gb-proto-bar"><span>테스트 중인 화면이에요</span><Link href={adminPath()}>관리자 화면 →</Link></div>;
 }
 
 /** 미리보기(?preview=1)로 들어온 판매자는 같은 탭에서 상세·장바구니로 이동해도 미리보기 상태를 유지한다. */
@@ -96,7 +96,7 @@ function dDay(closesAt: string, now: Date) {
 // ── 공구 홈 ──────────────────────────────────────────────
 
 export function StoreHomePage({ slug }: { slug: string }) {
-  const state = useGroupBuyState();
+  const state = usePublicGroupBuy(slug);
   const preview = usePreview(slug);
   const now = useNow();
   const router = useRouter();

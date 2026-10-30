@@ -15,9 +15,9 @@ import { ManualOrderV2, TrackingImportV2 } from "./dialogs-v2";
 import { SettingsV2 } from "./settings-v2";
 import { priceCart } from "./pricing";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
-import { resetGroupBuyState, updateGroupBuyState, useGroupBuyState } from "./store";
+import { insertExampleGroupBuy, onGroupBuySyncError, reloadGroupBuyState, unlockAdmin, updateGroupBuyState, useGroupBuyState, useGroupBuySync } from "./store";
 import type { GbOrder, GbProduct, GroupBuy, GroupBuyState } from "./types";
-import { absoluteUrl, adminPath, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, productPath, ProductThumb, type Cart, won } from "./ui";
+import { absoluteUrl, AdminBaseContext, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, productPath, useAdminPath, ProductThumb, type Cart, won } from "./ui";
 import { axesFor } from "./variants";
 import "./group-buy.css";
 import "./admin-v2.css";
@@ -50,18 +50,40 @@ function dday(groupBuy: GroupBuy, now: Date) {
 }
 const shortDate = (value: string) => { const d = new Date(value); return `${d.getMonth() + 1}.${d.getDate()}`; };
 
+/** 저장 위치 안내(개발용 파일인지 Supabase인지) */
 function ProtoNote() {
-  const toast = useContext(ToastContext);
-  const [confirming, setConfirming] = useState(false);
-  return <p className="gbx-proto">프로토타입 · 이 브라우저에만 저장돼요
-    {confirming ? <><button type="button" onClick={() => setConfirming(false)}>취소</button><button type="button" className="danger" onClick={() => { resetGroupBuyState(); setConfirming(false); toast({ message: "데모 데이터로 초기화했어요." }); }}>초기화 확정</button></>
-      : <button type="button" onClick={() => setConfirming(true)}><RotateCcw />데모 데이터로 초기화</button>}
-  </p>;
+  const sync = useGroupBuySync();
+  return <p className="gbx-proto">{sync.storage === "file" ? "개발용 · 이 컴퓨터의 파일(.data)에 저장돼요" : "시험 운영 중 · Supabase에 저장돼요"}{sync.saving ? " · 저장 중…" : ""}</p>;
 }
 
 // ── 공구 목록 ────────────────────────────────────────────
 
+function EmptyList({ create }: { create: () => void }) {
+  const toast = useContext(ToastContext);
+  const [busy, setBusy] = useState(false);
+  const insert = () => { setBusy(true); insertExampleGroupBuy().then(() => toast({ message: "마약 팬츠 예시를 넣었어요. 주문은 비어 있어요." }), (error: unknown) => toast({ message: error instanceof Error ? error.message : "예시를 넣지 못했어요.", error: true })).finally(() => setBusy(false)); };
+  return <div className="gbx-empty"><strong>아직 만든 공구가 없어요.</strong><button type="button" className="gbx-btn primary" onClick={create}><Plus />새 공구</button><button type="button" className="gbx-btn" disabled={busy} onClick={insert}>{busy ? "넣는 중…" : "마약 팬츠 예시 넣기"}</button></div>;
+}
+
+/** 불러오기 실패·관리자 비밀번호 화면 */
+function SyncGate() {
+  const sync = useGroupBuySync();
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (sync.status === "locked") return <form className="gbx-gate" onSubmit={(event) => { event.preventDefault(); setBusy(true); setError(""); unlockAdmin(code).catch((failure: unknown) => setError(failure instanceof Error ? failure.message : "확인하지 못했어요.")).finally(() => setBusy(false)); }}>
+    <strong>관리자 비밀번호</strong>
+    <p>공구 관리 화면은 비밀번호를 아는 사람만 볼 수 있어요.</p>
+    <input type="password" value={code} onChange={(event) => setCode(event.target.value)} autoFocus aria-label="관리자 비밀번호" />
+    {error ? <small className="red">{error}</small> : null}
+    <button type="submit" className="gbx-btn primary" disabled={!code || busy}>{busy ? "확인 중…" : "들어가기"}</button>
+  </form>;
+  if (sync.status === "error") return <div className="gbx-empty"><strong>공구 데이터를 불러오지 못했어요.</strong><p className="gbx-help">{sync.error}</p><button type="button" className="gbx-btn" onClick={() => void reloadGroupBuyState()}>다시 시도</button></div>;
+  return <p className="gbx-help">불러오는 중…</p>;
+}
+
 function ListPage({ state }: { state: GroupBuyState }) {
+  const adminPath = useAdminPath();
   const run = useRun();
   const copy = useCopy();
   const router = useRouter();
@@ -102,7 +124,7 @@ function ListPage({ state }: { state: GroupBuyState }) {
         </div>
       </li>;
     })}</ul>
-    {!groupBuys.length ? <div className="gbx-empty"><strong>아직 만든 공구가 없어요.</strong><button type="button" className="gbx-btn primary" onClick={create}><Plus />새 공구</button></div> : null}
+    {!groupBuys.length ? <EmptyList create={create} /> : null}
     <ProtoNote />
   </>;
 }
@@ -112,6 +134,7 @@ function ListPage({ state }: { state: GroupBuyState }) {
 type Tab = "orders" | "stock" | "settings";
 
 function DetailPage({ state, groupBuyId, initialTab }: { state: GroupBuyState; groupBuyId: string; initialTab: Tab }) {
+  const adminPath = useAdminPath();
   const copy = useCopy();
   const [tab, setTabState] = useState<Tab>(initialTab);
   const setTab = (next: Tab) => { setTabState(next); window.history.replaceState(null, "", next === "orders" ? adminPath(groupBuyId) : `${adminPath(groupBuyId)}?tab=${next}`); };
@@ -696,7 +719,7 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
 
 // ── 화면 ─────────────────────────────────────────────────
 
-export default function GroupBuyAdminV2({ groupBuyId, tab }: { groupBuyId?: string; tab?: string }) {
+export default function GroupBuyAdminV2({ groupBuyId, tab, basePath = "" }: { groupBuyId?: string; tab?: string; basePath?: string }) {
   const state = useGroupBuyState();
   const [toast, setToast] = useState<Toast | null>(null);
   const show = useCallback((next: Omit<Toast, "id">) => setToast({ ...next, id: Date.now() }), []);
@@ -705,6 +728,8 @@ export default function GroupBuyAdminV2({ groupBuyId, tab }: { groupBuyId?: stri
     const timer = window.setTimeout(() => setToast(null), toast.undo ? 7000 : 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  // 저장이 실패하면(다른 기기에서 먼저 고친 경우 등) 알리고, 저장소가 최신 데이터로 다시 불러온다.
+  useEffect(() => onGroupBuySyncError((message) => show({ message, error: true })), [show]);
   // 상세(설정)에서 공구를 지우면 목록으로 넘어오며 화면이 새로 그려지므로, 되돌리기 토스트는 여기서 띄운다.
   useEffect(() => {
     if (groupBuyId) return;
@@ -712,10 +737,11 @@ export default function GroupBuyAdminV2({ groupBuyId, tab }: { groupBuyId?: stri
     if (removed) show({ message: `‘${removed.groupBuy.title}’ 공구를 삭제했어요.`, undo: () => { updateGroupBuyState((current) => restoreGroupBuy(current, removed)); show({ message: "되돌렸어요." }); } });
   }, [groupBuyId, show]);
 
-  return <Shell section="group-buys" basePath="/test">
+  return <Shell section="group-buys" basePath={basePath}>
+    <AdminBaseContext.Provider value={basePath}>
     <ToastContext.Provider value={show}>
       <div className="gbx">
-        {!state ? <p className="gbx-help">불러오는 중…</p> : groupBuyId ? <DetailPage state={state} groupBuyId={groupBuyId} initialTab={tab === "stock" || tab === "settings" ? tab : "orders"} /> : <ListPage state={state} />}
+        {!state ? <SyncGate /> : groupBuyId ? <DetailPage state={state} groupBuyId={groupBuyId} initialTab={tab === "stock" || tab === "settings" ? tab : "orders"} /> : <ListPage state={state} />}
       </div>
       {toast ? <div key={toast.id} className={`gbx-toast ${toast.error ? "error" : ""}`} role="status">
         <span>{toast.message}</span>
@@ -723,5 +749,6 @@ export default function GroupBuyAdminV2({ groupBuyId, tab }: { groupBuyId?: stri
         <button type="button" aria-label="닫기" onClick={() => setToast(null)}><X /></button>
       </div> : null}
     </ToastContext.Provider>
+    </AdminBaseContext.Provider>
   </Shell>;
 }

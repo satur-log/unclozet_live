@@ -1,5 +1,6 @@
 "use client";
 
+import { createContext, useContext } from "react";
 import { Minus, Plus } from "lucide-react";
 import { isSoldOut, remainingStock } from "./pricing";
 import type { Cart } from "./selection";
@@ -7,7 +8,14 @@ import type { GroupBuy } from "./types";
 export type { Cart } from "./selection";
 
 export const TEST_BASE = "/test";
-export const adminPath = (groupBuyId?: string) => `${TEST_BASE}/group-buys${groupBuyId ? `/${groupBuyId}` : ""}`;
+/** 공구 관리 주소. 대시보드(/group-buys)와 테스트 모드(/test/group-buys) 둘 다에서 열린다. */
+export const adminPath = (groupBuyId?: string, base = "") => `${base}/group-buys${groupBuyId ? `/${groupBuyId}` : ""}`;
+export const AdminBaseContext = createContext("");
+/** 지금 열린 관리 화면 기준(대시보드 또는 /test)의 공구 관리 주소 */
+export function useAdminPath() {
+  const base = useContext(AdminBaseContext);
+  return (groupBuyId?: string) => adminPath(groupBuyId, base);
+}
 export const orderFormPath = (slug: string) => `${TEST_BASE}/gb/${slug}`;
 export const productPath = (slug: string, productId: string) => `${TEST_BASE}/gb/${slug}/p/${productId}`;
 export const checkoutPath = (slug: string) => `${TEST_BASE}/gb/${slug}/checkout`;

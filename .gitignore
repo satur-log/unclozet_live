@@ -13,3 +13,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.tsbuildinfo
+
+# 공구 개발용 로컬 저장소
+.data

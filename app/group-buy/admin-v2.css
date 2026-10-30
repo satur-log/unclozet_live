@@ -747,3 +747,12 @@ i.out { background: #c4c4c4 !important; }
 .gbx-stock-table { min-width: 560px; }
 .gbx-stock-table td { height: 56px; }
 .gbx-stock-list .gbx-table-wrap { margin-top: 0; }
+
+/* 관리자 비밀번호 */
+.gbx-gate { display: grid; gap: 10px; max-width: 320px; margin: 80px auto; }
+.gbx-gate strong { font-size: 18px; }
+.gbx-gate p { margin: 0; color: var(--x-muted); font-size: 13px; }
+.gbx-gate input { height: 42px; padding: 0 12px; border: 1px solid #d4d4d4; font: inherit; }
+.gbx-gate input:focus { outline: 0; border-color: var(--x-ink); box-shadow: inset 0 0 0 1px var(--x-ink); }
+.gbx-gate .red { color: var(--x-red); }
+.gbx-proto button:disabled { opacity: .5; cursor: default; }

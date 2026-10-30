@@ -8,7 +8,7 @@ import { availability, groupBuyBySlug } from "./model";
 import { findOption, isSoldOut, priceCart } from "./pricing";
 import { saveSelection, useSelection, type Cart } from "./selection";
 import { SizeChartView } from "./size-chart";
-import { useGroupBuyState } from "./store";
+import { usePublicGroupBuy } from "./public-store";
 import { ClosedNotice, MissingStore, ProtoBar, StoreFrame, priceRange, useNow, usePreview } from "./storefront";
 import type { GbProduct, GroupBuy, VariantAxis } from "./types";
 import { cartLines, checkoutPath, longDateTime, orderFormPath, ProductThumb, productPath, won } from "./ui";
@@ -99,7 +99,7 @@ function lineLabel(groupBuy: GroupBuy, product: GbProduct, optionId: string) {
 }
 
 export function ProductPage({ slug, productId }: { slug: string; productId: string }) {
-  const state = useGroupBuyState();
+  const state = usePublicGroupBuy(slug);
   const preview = usePreview(slug);
   const now = useNow();
   const router = useRouter();

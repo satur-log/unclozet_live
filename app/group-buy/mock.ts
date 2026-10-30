@@ -75,7 +75,8 @@ function pantsProduct(): GbProduct {
 
 const PANTS_OPENED_HOURS_AGO = 96;
 
-function pantsGroupBuy(now: Date): GroupBuy {
+/** 예시 공구(마약 팬츠). 주문 없이 상품·옵션·설정만. 운영 Supabase에는 이것만 넣는다. */
+export function pantsGroupBuy(now = new Date()): GroupBuy {
   return {
     id: "gb-magic-pants", slug: "pants", title: "마약 팬츠 공구 (슬림 / 와이드)",
     description: "슬림 / 와이드 두 가지 핏, 숏 · 롱 · 슈퍼롱 기장으로 준비했어요. 모든 조합 25,900원.",

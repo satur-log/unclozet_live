@@ -5,12 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Check, Copy, ExternalLink, Search, Truck } from "lucide-react";
 import { saveSelection, useSelection } from "./selection";
-import { availability, customerInputIssues, customerStep, groupBuyBySlug, lookupOrders, maskAddress, maskName, maskPhone, orderByToken, submitOrder, trackingUrl, type SubmitResult } from "./model";
+import { availability, customerInputIssues, customerStep, groupBuyBySlug, maskAddress, maskName, maskPhone, orderByToken, trackingUrl } from "./model";
 import { priceCart, type PricedCart } from "./pricing";
-import { updateGroupBuyState, useGroupBuyState } from "./store";
+import { lookupPublicOrders, submitPublicOrder, useOrderByToken, usePublicGroupBuy } from "./public-store";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
 import { ClosedNotice, MissingStore, ProtoBar, StoreFrame, StoreHeader, useNow, usePreview } from "./storefront";
-import type { CustomerInput, GbOrder, GroupBuy } from "./types";
+import type { CustomerInput, GbOrder, GroupBuy, GroupBuyState } from "./types";
 import { absoluteUrl, cartLines, copyText, formatPhoneInput, longDateTime, lookupPath, orderFormPath, orderViewPath, PriceRows, ProductThumb, productPath, won } from "./ui";
 import "./group-buy.css";
 
@@ -74,7 +74,7 @@ function Field({ label, error, children, hint, full = false }: { label: string; 
 
 /** 주문서(결제 정보 입력). 장바구니 또는 "바로 구매"로 담은 상품을 주문한다. */
 export function CheckoutPage({ slug }: { slug: string }) {
-  const state = useGroupBuyState();
+  const state = usePublicGroupBuy(slug);
   const router = useRouter();
   const preview = usePreview(slug);
   const selection = useSelection(slug);
@@ -139,12 +139,8 @@ export function CheckoutPage({ slug }: { slug: string }) {
     const blocked = submitBlockedReason();
     if (blocked) { setFormError(blocked); return; }
     setSubmitting(true);
-    // 실제 서비스에서는 여기서 Turnstile 토큰과 함께 주문 생성 함수를 호출한다.
-    window.setTimeout(() => {
-      const result = updateGroupBuyState<SubmitResult>((current) => {
-        const outcome = submitOrder(current, { groupBuyId: gb.id, lines: cartLines(cart), input: data, expectedTotal, source: "form" });
-        return { state: outcome.ok ? outcome.state : current, value: outcome };
-      })!;
+    // 금액·주문번호는 서버가 다시 계산한다. 고객 공개 전에 여기에 Turnstile(봇 차단) 토큰을 붙인다.
+    void submitPublicOrder({ groupBuyId: gb.id, lines: cartLines(cart), input: data, expectedTotal, source: "form" }).then((result) => {
       setSubmitting(false);
       if (result.ok) {
         recordSubmit();
@@ -152,9 +148,9 @@ export function CheckoutPage({ slug }: { slug: string }) {
         router.push(`${orderViewPath(result.order.lookupToken)}?new=1`);
         return;
       }
-      if (result.code === "PRICE_CHANGED" && result.priced) { setChanged(result.priced); return; }
+      if (result.code === "PRICE_CHANGED" && "priced" in result && result.priced) { setChanged(result.priced); return; }
       setFormError(result.message);
-    }, 350);
+    });
   }
 
   if (!priced.items.length) return <StoreFrame groupBuy={gb} preview={preview} open={open} back={orderFormPath(slug)} title="주문서"><div className="gb-view-page"><div className="gb-closed"><strong>주문할 상품이 없어요</strong><p>상품 상세에서 옵션을 고른 뒤 구매하기를 눌러주세요.</p><Link href={orderFormPath(slug)}>상품 보러 가기</Link></div></div></StoreFrame>;
@@ -275,7 +271,7 @@ function OrderCard({ order, groupBuy, showPayment = true }: { order: GbOrder; gr
 }
 
 export function OrderViewPage({ token }: { token: string }) {
-  const state = useGroupBuyState();
+  const state = useOrderByToken(token);
   const isNew = useSearchParams().get("new") === "1";
   if (!state) return <Loading />;
   const order = orderByToken(state, token);
@@ -297,29 +293,30 @@ export function OrderViewPage({ token }: { token: string }) {
 }
 
 export function LookupPage() {
-  const state = useGroupBuyState();
   const [phone, setPhone] = useState(""); const [pin, setPin] = useState("");
-  const [result, setResult] = useState<{ orderIds: string[] } | null>(null);
+  const [result, setResult] = useState<GroupBuyState | null>(null);
   const [message, setMessage] = useState("");
-  if (!state) return <Loading />;
-  function run(event: React.FormEvent) {
+  const [busy, setBusy] = useState(false);
+  async function run(event: React.FormEvent) {
     event.preventDefault(); setMessage("");
     if (!/^\d{4}$/.test(pin)) { setMessage("비밀번호 숫자 4자리를 입력하세요."); return; }
-    const outcome = updateGroupBuyState((current) => { const r = lookupOrders(current, phone, pin); return { state: r.state, value: r.result }; })!;
+    setBusy(true);
+    const outcome = await lookupPublicOrders(phone, pin);
+    setBusy(false);
     if (!outcome.ok) { setResult(null); setMessage(outcome.lockedUntil ? `${outcome.message} (${longDateTime(outcome.lockedUntil)} 이후 다시 시도)` : outcome.message); return; }
-    setResult({ orderIds: outcome.orders.map((order) => order.id) });
+    setResult(outcome.state);
   }
-  // 조회 후에도 판매자가 상태를 바꾸면 바로 반영되도록 id만 들고 최신 상태에서 다시 찾는다.
-  const orders = result ? result.orderIds.map((id) => state.orders.find((order) => order.id === id)).filter((order): order is GbOrder => Boolean(order)) : [];
+  const state = result;
+  const orders = result?.orders ?? [];
   return <CustomerFrame><StoreHeader title="주문 조회" back="/" lookupLink={false} /><div className="gb-view-page gb-shop">
     <header className="gb-lookup-head"><h1>주문 조회</h1><p>주문할 때 입력한 휴대폰 번호와 조회 비밀번호로 확인하세요.</p></header>
     <form className="gb-lookup-form" onSubmit={run}>
       <Field label="휴대폰 번호"><input value={phone} onChange={(e) => setPhone(formatPhoneInput(e.target.value))} inputMode="numeric" placeholder="010-0000-0000" autoComplete="tel" /></Field>
       <Field label="조회 비밀번호 4자리"><input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" type="password" maxLength={4} /></Field>
-      <button type="submit">조회하기</button>
+      <button type="submit" disabled={busy}>{busy ? "조회 중…" : "조회하기"}</button>
       {message ? <p className="gb-error" role="alert">{message}</p> : null}
       <p className="gb-help">비밀번호를 잊으셨나요? 블로그 안부글로 판매자에게 문의해 주세요. 확인 후 재설정해 드려요.</p>
     </form>
-    {result ? <section className="gb-lookup-results" aria-live="polite"><h2>주문 {orders.length}건</h2>{orders.map((order) => <OrderCard key={order.id} order={order} groupBuy={state.groupBuys.find((item) => item.id === order.groupBuyId)} />)}</section> : null}
+    {state ? <section className="gb-lookup-results" aria-live="polite"><h2>주문 {orders.length}건</h2>{orders.map((order) => <OrderCard key={order.id} order={order} groupBuy={state.groupBuys.find((item) => item.id === order.groupBuyId)} />)}</section> : null}
   </div></CustomerFrame>;
 }
