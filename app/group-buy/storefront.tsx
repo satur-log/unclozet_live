@@ -33,6 +33,13 @@ export function usePreview(slug: string) {
   return preview;
 }
 
+/** 서버가 만든 HTML과 처음 그리는 화면이 같아야 한다. 남은 시간처럼 지금 시각에 따라 달라지는 글자는 화면이 뜬 뒤에 그린다. */
+export function useMounted() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted;
+}
+
 export function useNow(intervalMs = 30_000) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), intervalMs); return () => window.clearInterval(timer); }, [intervalMs]);
@@ -101,6 +108,7 @@ export function StoreHomePage({ slug }: { slug: string }) {
   const state = usePublicGroupBuy(slug);
   const preview = usePreview(slug);
   const now = useNow();
+  const mounted = useMounted();
   const router = useRouter();
   const groupBuy = state ? groupBuyBySlug(state, slug) : null;
   const onlyProduct = groupBuy?.products.length === 1 ? groupBuy.products[0].id : null;
@@ -117,7 +125,7 @@ export function StoreHomePage({ slug }: { slug: string }) {
         {groupBuy.imageUrl ? <img src={groupBuy.imageUrl} alt="" /> : <div className="gb-banner-art" aria-hidden="true">{groupBuy.products.slice(0, 3).map((product) => <ProductThumb key={product.id} name={product.name} imageUrl={product.images[0] ?? ""} size={84} />)}</div>}
       </section>
       <section className="gb-home-intro">
-        <div className="gb-home-badges"><span className={`gb-dday ${open.orderable ? "" : "closed"}`}>{open.orderable ? dDay(groupBuy.closesAt, now) : open.reason === "not-open" ? "오픈 예정" : "마감"}</span><span>~ {longDateTime(groupBuy.closesAt)}</span></div>
+        <div className="gb-home-badges"><span className={`gb-dday ${open.orderable ? "" : "closed"}`}>{open.orderable ? (mounted ? dDay(groupBuy.closesAt, now) : "") : open.reason === "not-open" ? "오픈 예정" : "마감"}</span><span>~ {longDateTime(groupBuy.closesAt)}</span></div>
         <h1>{groupBuy.title}</h1>
         {groupBuy.description ? <p className="gb-desc">{groupBuy.description}</p> : null}
         <ul className="gb-chips">

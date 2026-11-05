@@ -19,7 +19,7 @@ export function Shell({ children, section, basePath = "" }: { children: React.Re
   // 공구 탭이 바로 뜨도록 다른 탭을 보는 동안 공구 데이터를 미리 받아 둔다.
   useEffect(() => {
     if (section === "group-buys") return;
-    const timer = window.setTimeout(() => { void import("../group-buy/store").then(({ preloadGroupBuyState }) => preloadGroupBuyState()); }, 800);
+    const timer = window.setTimeout(() => { void import("../group-buy/store").then(({ preloadGroupBuyState }) => preloadGroupBuyState()); void import("../group-buy/admin-v2"); }, 800);
     return () => window.clearTimeout(timer);
   }, [section]);
   return <div className="v2-app">

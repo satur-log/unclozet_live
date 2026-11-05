@@ -9,7 +9,7 @@ import { findOption, isSoldOut, priceCart } from "./pricing";
 import { saveSelection, useSelection, type Cart } from "./selection";
 import { SizeChartView } from "./size-chart";
 import { usePublicGroupBuy } from "./public-store";
-import { ClosedNotice, MissingStore, ProtoBar, StoreFrame, priceRange, useNow, usePreview } from "./storefront";
+import { ClosedNotice, MissingStore, ProtoBar, StoreFrame, priceRange, useMounted, useNow, usePreview } from "./storefront";
 import type { GbProduct, GroupBuy, VariantAxis } from "./types";
 import { cartLines, checkoutPath, longDateTime, orderFormPath, ProductThumb, productPath, won } from "./ui";
 import { attrsOf, axesFor, axisState, normalizeSelection, resolveOption, type Selection } from "./variants";
@@ -102,6 +102,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
   const state = usePublicGroupBuy(slug);
   const preview = usePreview(slug);
   const now = useNow();
+  const mounted = useMounted();
   const router = useRouter();
   const saved = useSelection(slug);
   const [lines, setLines] = useState<Cart>({});
@@ -217,7 +218,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
           <p className="gb-pdp-price">{item.originalPrice && item.originalPrice > min ? <del>{won(item.originalPrice)}</del> : null}<strong>{min.toLocaleString("ko-KR")}{max > min ? "~" : ""}</strong> 원</p>
           <dl className="gb-pdp-rows">
             <div><dt>배송</dt><dd>{won(gb.shippingFee)}{gb.remoteShippingFee ? ` · 제주·도서산간 ${won(gb.remoteShippingFee)}` : ""}{gb.freeShippingThreshold != null ? ` · ${won(gb.freeShippingThreshold)} 이상 무료` : ""}</dd></div>
-            <div><dt>마감</dt><dd>{longDateTime(gb.closesAt)} <b>{open.orderable ? `${timeLeft(gb.closesAt, now)} 남음` : "마감"}</b></dd></div>
+            <div><dt>마감</dt><dd>{longDateTime(gb.closesAt)} <b>{open.orderable ? (mounted ? `${timeLeft(gb.closesAt, now)} 남음` : "") : "마감"}</b></dd></div>
             <div><dt>결제</dt><dd>무통장 입금 ({gb.bankName})</dd></div>
           </dl>
           {notices.length ? <ul className="gb-pdp-notices">{notices.map((line) => <li key={line}>{line}</li>)}</ul> : null}

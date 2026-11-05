@@ -24,14 +24,16 @@ export const orderViewPath = (token: string) => `${TEST_BASE}/gb/order/${token}`
 export const absoluteUrl = (path: string) => typeof window === "undefined" ? path : `${window.location.origin}${path}`;
 
 export const won = (value: number) => `${value.toLocaleString("ko-KR")}원`;
+// 공구 시각은 항상 한국 시간으로 보여준다. 서버(UTC)가 만든 HTML과 브라우저 화면도 같아진다.
+const kst = (value: string | Date) => new Date(new Date(value).getTime() + 9 * 60 * 60 * 1000);
 export const dateTime = (value: string) => {
-  const d = new Date(value);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const d = kst(value);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 };
 export const longDateTime = (value: string | Date) => {
-  const d = new Date(value);
-  const weekday = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()];
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${weekday}) ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const d = kst(value);
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][d.getUTCDay()];
+  return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 (${weekday}) ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 };
 
 export function downloadBytes(bytes: Uint8Array, fileName: string) {
