@@ -9,7 +9,7 @@ import { createShippingWorkbook, createWorkbook } from "../app/dashboard-v2/work
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
   deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
-  customerDuplicateGroups, customerFor, ensureCustomer, markCustomerDistinct, mergeCustomers, saveSettlement, setCustomerBlocked, splitCustomer,
+  customerDuplicateGroups, customerFor, dismissOrderSuggestion, ensureCustomer, linkOrderToCustomer, markCustomerDistinct, mergeCustomers, orderCustomerSuggestions, saveSettlement, setCustomerBlocked, splitCustomer,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
 import { hasMeaningfulDashboardChange, isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
@@ -213,6 +213,48 @@ test("merging customers keeps the main ID, links old IDs to it, and can be split
   assert.equal(customerCheckCount(customerFor(state, "M.oon_")!), 0);
   assert.equal(customerDuplicateGroups(state).some((group) => group.customers.some((customer) => customer.id === other.id)), false, "분리한 고객은 다시 추천하지 않는다");
   assert.ok(isDashboardState(state));
+});
+
+test("after settlement a similar ID is suggested; linking fills the saved delivery; dismissal sticks", () => {
+  let { state, broadcastId } = setup(["m.oon_x", "new.person", "known.one"]);
+  const saved = (id: string, instagramId: string, room: string) => ({ id, instagramId, delivery: info(room), updatedAt: "2026-01-01T00:00:00.000Z" });
+  state.customers = [{ ...saved("moon", "moon_x", "101"), delivery: { ...info("101"), phone: "010-8888-8888" } }, saved("known", "known.one", "102"), { ...saved("known2", "known.ones", "103"), delivery: { ...info("103"), phone: "010-9999-9999" } }];
+  const orderOf = (name: string) => state.broadcasts[0].orders.find((order) => order.instagramId === name)!;
+  const found = orderCustomerSuggestions(state, state.broadcasts[0]);
+  assert.equal(found.get(orderOf("m.oon_x").id)?.reason, "id");
+  assert.deepEqual(found.get(orderOf("m.oon_x").id)?.customers.map((customer) => customer.id), ["moon"]);
+  assert.equal(found.has(orderOf("new.person").id), false, "비슷한 고객이 없으면 제안 없음");
+  assert.equal(found.has(orderOf("known.one").id), false, "이미 아는 고객은 아이디로 제안하지 않음");
+
+  const dismissed = dismissOrderSuggestion(state, "m.oon_x", ["moon"]);
+  assert.equal(orderCustomerSuggestions(dismissed, dismissed.broadcasts[0]).has(orderOf("m.oon_x").id), false);
+
+  state = linkOrderToCustomer(state, broadcastId, orderOf("m.oon_x").id, "moon");
+  assert.equal(customerFor(state, "m.oon_x")?.id, "moon");
+  assert.match(orderOf("m.oon_x").delivery?.address ?? "", /101호/);
+  assert.equal(orderOf("m.oon_x").status, "WAITING", "입금 확인 전에는 대기");
+  assert.equal(orderCustomerSuggestions(state, state.broadcasts[0]).has(orderOf("m.oon_x").id), false);
+  assert.ok(isDashboardState(state));
+});
+
+test("after an order form the same phone is suggested, and a different address asks which to use", () => {
+  let { state, broadcastId } = setup(["other.name"]);
+  state.customers = [{ id: "main", instagramId: "main.name", delivery: info("101"), updatedAt: "2026-01-01T00:00:00.000Z" }];
+  state = registerOrder(state, broadcastId, kakao("other.name", "202")).state;
+  const order = () => state.broadcasts[0].orders[0];
+  const found = orderCustomerSuggestions(state, state.broadcasts[0]).get(order().id);
+  assert.equal(found?.reason, "phone");
+  assert.deepEqual(found?.customers.map((customer) => customer.id), ["main"]);
+
+  state = linkOrderToCustomer(state, broadcastId, order().id, "main");
+  assert.equal(customerFor(state, "other.name")?.id, "main");
+  assert.equal(order().status, "WAITING");
+  assert.match(order().conflict?.incoming.address ?? "", /202호/);
+  assert.match(order().conflict?.previous.address ?? "", /101호/);
+  state = resolveConflict(state, broadcastId, order().id, "incoming");
+  assert.equal(order().status, "READY");
+  assert.match(customerFor(state, "main.name")?.delivery.address ?? "", /202호/);
+  assert.equal(orderCustomerSuggestions(state, state.broadcasts[0]).size, 0);
 });
 
 test("customer deletion leaves historical broadcast orders intact", () => {

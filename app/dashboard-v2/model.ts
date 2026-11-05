@@ -396,8 +396,25 @@ export function importCustomers(state: DashboardState, records: CustomerImportRe
 
 export type DuplicateGroup = { customers: Customer[]; samePhone: boolean; sameName: boolean };
 
-const phoneKey = (customer: Customer) => { const digits = customer.delivery.phone.replace(/\D/g, ""); return digits.length >= 10 ? digits : ""; };
-const idShape = (customer: Customer) => canonicalInstagramId(customer.instagramId).replace(/[._]/g, "");
+const deliveryPhoneKey = (delivery: Delivery) => { const digits = delivery.phone.replace(/\D/g, ""); return digits.length >= 10 ? digits : ""; };
+const phoneKey = (customer: Customer) => deliveryPhoneKey(customer.delivery);
+/** 비슷할 수 있는 아이디끼리 겹치는 열쇠. 점·밑줄을 뺀 모양과, 한 글자를 지운 모양(5자 이상). */
+function idKeys(instagramId: string) {
+  const key = canonicalInstagramId(instagramId);
+  const shape = key.replace(/[._]/g, "");
+  const keys = shape ? [`shape:${shape}`] : [];
+  if (key.length < 5) return keys;
+  keys.push(`near:${key}`);
+  for (let at = 0; at < key.length; at += 1) keys.push(`near:${key.slice(0, at)}${key.slice(at + 1)}`);
+  return keys;
+}
+/** 점·밑줄만 다르거나, 5자 이상에서 한 글자만 다른 아이디인지. */
+function similarIds(a: string, b: string) {
+  const left = canonicalInstagramId(a); const right = canonicalInstagramId(b);
+  const shape = left.replace(/[._]/g, "");
+  if (shape && shape === right.replace(/[._]/g, "")) return true;
+  return Math.min(left.length, right.length) >= 5 && distance(left, right) <= 1;
+}
 const markedDistinct = (a: Customer, b: Customer) => Boolean(a.distinctFrom?.includes(b.id) || b.distinctFrom?.includes(a.id));
 
 /** 연락처가 같거나, 아이디가 점·밑줄만 다르거나, 5자 이상에서 한 글자만 다른 고객 묶음. 합칠지는 사람이 확인한다. 최근 주문 순. */
@@ -407,12 +424,9 @@ export function customerDuplicateGroups(state: DashboardState): DuplicateGroup[]
   const buckets = new Map<string, number[]>();
   const add = (key: string, index: number) => { const bucket = buckets.get(key); if (bucket) bucket.push(index); else buckets.set(key, [index]); };
   customers.forEach((customer, index) => {
-    const phone = phoneKey(customer); const shape = idShape(customer); const instagramId = canonicalInstagramId(customer.instagramId);
+    const phone = phoneKey(customer);
     if (phone) add(`phone:${phone}`, index);
-    if (shape) add(`shape:${shape}`, index);
-    if (instagramId.length < 5) return;
-    add(`near:${instagramId}`, index);
-    for (let at = 0; at < instagramId.length; at += 1) add(`near:${instagramId.slice(0, at)}${instagramId.slice(at + 1)}`, index);
+    for (const key of idKeys(customer.instagramId)) add(key, index);
   });
   const parent = customers.map((_, index) => index);
   const root = (index: number): number => { while (parent[index] !== index) { parent[index] = parent[parent[index]]; index = parent[index]; } return index; };
@@ -420,10 +434,7 @@ export function customerDuplicateGroups(state: DashboardState): DuplicateGroup[]
     for (let i = 0; i < members.length; i += 1) for (let j = i + 1; j < members.length; j += 1) {
       const a = customers[members[i]]; const b = customers[members[j]];
       if (markedDistinct(a, b)) continue;
-      if (key.startsWith("near:")) {
-        const left = canonicalInstagramId(a.instagramId); const right = canonicalInstagramId(b.instagramId);
-        if (Math.min(left.length, right.length) < 5 || distance(left, right) > 1) continue;
-      }
+      if (key.startsWith("near:") && !similarIds(a.instagramId, b.instagramId)) continue;
       parent[root(members[j])] = root(members[i]);
     }
   }
@@ -484,4 +495,64 @@ export function splitCustomer(state: DashboardState, customerId: string, mergedI
 /** "다른 사람"으로 표시해 이 고객을 묶음의 나머지 고객들과 함께 추천하지 않는다. */
 export function markCustomerDistinct(state: DashboardState, customerId: string, otherIds: string[]) {
   return updateCustomerRecord(state, customerId, (customer) => ({ ...customer, distinctFrom: [...new Set([...(customer.distinctFrom ?? []), ...otherIds])], updatedAt: now() }));
+}
+
+export type CustomerSuggestion = { reason: "id" | "phone"; customers: Customer[] };
+
+/**
+ * 진행 중인 주문마다 같은 사람일 수 있는 기존 고객을 찾는다.
+ * 연락처가 있으면(주문서 등록 뒤) 같은 연락처로, 없으면(정산 직후) 비슷한 아이디로 찾는다. 합칠지는 사람이 정한다.
+ */
+export function orderCustomerSuggestions(state: DashboardState, broadcast: Broadcast) {
+  const byId = new Map<string, Customer>();
+  const byPhone = new Map<string, Customer[]>();
+  const byKey = new Map<string, Customer[]>();
+  const push = (map: Map<string, Customer[]>, key: string, customer: Customer) => { const list = map.get(key); if (!list) map.set(key, [customer]); else if (!list.includes(customer)) list.push(customer); };
+  for (const customer of state.customers) {
+    const phone = phoneKey(customer);
+    if (phone) push(byPhone, phone, customer);
+    for (const instagramId of customerIds(customer)) {
+      byId.set(instagramId, customer);
+      for (const key of idKeys(instagramId)) push(byKey, key, customer);
+    }
+  }
+  const suggestions = new Map<string, CustomerSuggestion>();
+  for (const order of broadcast.orders) {
+    const instagramId = canonicalInstagramId(order.instagramId);
+    if (!instagramId || order.status === "COMPLETED") continue;
+    const own = byId.get(instagramId);
+    const notOwn = (customer: Customer) => customer !== own && !(own && markedDistinct(own, customer));
+    const phone = order.delivery ? deliveryPhoneKey(order.delivery) : "";
+    if (phone) {
+      const customers = (byPhone.get(phone) ?? []).filter(notOwn);
+      if (customers.length) suggestions.set(order.id, { reason: "phone", customers });
+    } else if (!own || !hasSavedDelivery(own)) {
+      const found = new Set(idKeys(instagramId).flatMap((key) => byKey.get(key) ?? []));
+      const customers = [...found].filter((customer) => notOwn(customer) && customerIds(customer).some((other) => similarIds(instagramId, other)));
+      if (customers.length) suggestions.set(order.id, { reason: "id", customers });
+    }
+  }
+  return suggestions;
+}
+
+/** 주문의 아이디를 기존 고객에 합친다. 주문서가 없으면 저장된 배송 정보를 채우고, 주문서가 다르면 어느 쪽을 쓸지 묻는다. */
+export function linkOrderToCustomer(state: DashboardState, broadcastId: string, orderId: string, customerId: string) {
+  const order = getBroadcast(state, broadcastId).orders.find((item) => item.id === orderId);
+  if (!order) throw new Error("주문을 찾을 수 없습니다.");
+  const ensured = ensureCustomer(state, order.instagramId);
+  if (ensured.customerId === customerId) throw new Error("이미 같은 고객이에요.");
+  const merged = mergeCustomers(ensured.state, customerId, [ensured.customerId]);
+  const customer = merged.customers.find((item) => item.id === customerId)!;
+  if (!hasSavedDelivery(customer) || order.status === "COMPLETED") return merged;
+  let next = order;
+  if (!order.delivery && !order.sourceText) next = { ...order, delivery: { ...customer.delivery }, registrationConfirmed: false };
+  else if (order.delivery && !sameDelivery(customer.delivery, order.delivery)) next = { ...order, conflict: { previous: { ...customer.delivery }, incoming: { ...order.delivery }, customerId } };
+  if (next === order) return merged;
+  return { ...merged, broadcasts: merged.broadcasts.map((broadcast) => broadcast.id === broadcastId ? { ...broadcast, orders: broadcast.orders.map((item) => item.id === orderId ? refreshStatus(broadcast, next) : item) } : broadcast) };
+}
+
+/** 제안받은 고객들과 다른 사람이라고 기록한다. 아직 고객이 아니면 아이디만으로 만들어 둔다. */
+export function dismissOrderSuggestion(state: DashboardState, instagramId: string, customerIds: string[]) {
+  const ensured = ensureCustomer(state, instagramId);
+  return markCustomerDistinct(ensured.state, ensured.customerId, customerIds);
 }

@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import {
-  addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerFor, customerStatusLabel, ensureCustomer, setCustomerBlocked, deleteBroadcast, deliveryIssues, editOrder, exportReadyOrders, matchOrder, matchingCandidates, orderIssues,
-  registerOrder, renameBroadcast, resolveConflict, restoreOrder, saveDraft, saveSettlement, statusLabels,
+  addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerFor, customerLastOrderedAt, customerStatusLabel, dismissOrderSuggestion, ensureCustomer, linkOrderToCustomer, orderCustomerSuggestions, setCustomerBlocked, deleteBroadcast, deliveryIssues, editOrder, exportReadyOrders, matchOrder, matchingCandidates, orderIssues,
+  registerOrder, renameBroadcast, resolveConflict, restoreOrder, saveDraft, saveSettlement, statusLabels, type CustomerSuggestion,
 } from "./model";
 import { analyzeSettlement } from "./settlement";
 import type { Broadcast, Customer, Delivery, Order, OrderStatus } from "./types";
@@ -94,7 +94,7 @@ function BroadcastListV2({ basePath }: { basePath: string }) {
 
 // ── 상세 ─────────────────────────────────────────────────
 
-type View = "ALL" | OrderStatus | "ISSUES";
+type View = "ALL" | OrderStatus | "ISSUES" | "SUGGESTED";
 
 function EditableTitle({ broadcast }: { broadcast: Broadcast }) {
   const { commit } = useDashboard();
@@ -123,12 +123,13 @@ function BroadcastDetailV2({ broadcastId, basePath }: { broadcastId: string; bas
     return () => window.removeEventListener("keydown", onKey);
   }, [openId, orderOpen]);
 
+  const suggestions = useMemo(() => broadcast ? orderCustomerSuggestions(state, broadcast) : new Map<string, CustomerSuggestion>(), [state, broadcast]);
   const list = useMemo(() => {
     if (!broadcast) return [];
     const q = query.trim().toLowerCase();
-    return broadcast.orders.filter((order) => (view === "ALL" || (view === "ISSUES" ? needsReview(broadcast, order) : order.status === view))
+    return broadcast.orders.filter((order) => (view === "ALL" || (view === "SUGGESTED" ? suggestions.has(order.id) : view === "ISSUES" ? needsReview(broadcast, order) : order.status === view))
       && (!q || order.instagramId.toLowerCase().includes(q) || Boolean(order.delivery?.name.includes(query.trim()))));
-  }, [broadcast, view, query]);
+  }, [broadcast, view, query, suggestions]);
 
   if (!broadcast) return <div className="gbx-empty"><strong>방송 작업을 찾을 수 없어요.</strong><Link href={broadcastsV2Path(basePath)}>방송 목록으로</Link></div>;
   const current = broadcast;
@@ -138,6 +139,7 @@ function BroadcastDetailV2({ broadcastId, basePath }: { broadcastId: string; bas
     READY: current.orders.filter((o) => o.status === "READY").length,
     COMPLETED: current.orders.filter((o) => o.status === "COMPLETED").length,
     ISSUES: current.orders.filter((o) => needsReview(current, o)).length,
+    SUGGESTED: suggestions.size,
   };
   const totalAmount = current.settlements.reduce((sum, settlement) => sum + settlement.total, 0);
   const analysis = analyzeSettlement(current.memo);
@@ -201,7 +203,7 @@ function BroadcastDetailV2({ broadcastId, basePath }: { broadcastId: string; bas
       </div>
     </div>
     <div className="gbx-filters">
-      <div className="gbx-chips" role="tablist" aria-label="주문 상태">{([["ALL", "전체"], ["WAITING", "입금 전"], ["READY", "출력 대기"], ["COMPLETED", "완료"], ["ISSUES", "검토 필요"]] as const).map(([key, label]) =>
+      <div className="gbx-chips" role="tablist" aria-label="주문 상태">{([["ALL", "전체"], ["WAITING", "입금 전"], ["READY", "출력 대기"], ["COMPLETED", "완료"], ["ISSUES", "검토 필요"], ["SUGGESTED", "고객 확인"]] as const).filter(([key]) => key !== "SUGGESTED" || counts.SUGGESTED || view === key).map(([key, label]) =>
         <button key={key} type="button" role="tab" aria-selected={view === key} className={`${view === key ? "active" : ""} ${key === "ISSUES" && counts.ISSUES ? "warn" : ""}`} onClick={() => setView(key)}>{label}<b>{counts[key]}</b></button>)}</div>
     </div>
 
@@ -214,8 +216,9 @@ function BroadcastDetailV2({ broadcastId, basePath }: { broadcastId: string; bas
           const issues = order.sourceText || order.delivery ? orderIssues(current, order) : [];
           const known = order.instagramId ? customerFor(state, order.instagramId) : undefined;
           const checked = checkedInBroadcast(known, current, order);
+          const suggestion = suggestions.get(order.id);
           return <tr key={order.id} className={openId === order.id ? "open" : ""} onClick={() => setOpenId(order.id)}>
-            <td><strong>{order.instagramId || "아이디 미인식"}</strong>{known && (known.blocked || customerCheckCount(known)) ? <small className="red">{customerStatusLabel(known)}</small> : null}</td>
+            <td><strong>{order.instagramId || "아이디 미인식"}</strong>{known && (known.blocked || customerCheckCount(known)) ? <small className="red">{customerStatusLabel(known)}</small> : null}{suggestion ? <small>{suggestion.reason === "phone" ? "연락처 같음" : "혹시"} {suggestion.customers[0].instagramId}{suggestion.customers.length > 1 ? ` 외 ${suggestion.customers.length - 1}` : ""}{suggestion.reason === "id" ? "?" : ""}</small> : null}</td>
             <td>{order.delivery ? <><strong>{order.delivery.name || "성명 누락"}</strong><small>{order.delivery.phone || "연락처 누락"}</small></> : <span className="gbx-muted">주문서 미등록</span>}</td>
             <td className="num">{settlement ? <><strong>{won(settlement.total)}</strong>{settlement.items.length ? <small className="gbx-bc-lines" title={settlement.items.join("\n")}>{settlement.items.join(" · ")}</small> : null}</> : <span className="gbx-muted">—</span>}</td>
             <td className="num">{settlement ? `${settlement.quantity}개` : <span className="gbx-muted">—</span>}</td>
@@ -240,13 +243,13 @@ function BroadcastDetailV2({ broadcastId, basePath }: { broadcastId: string; bas
       footer={<><button type="button" className="gbx-btn ghost" onClick={() => setOrderOpen(false)}>취소</button><button type="button" className="gbx-btn primary" disabled={!current.orderDraft.trim()} onClick={runOrder}>주문서 등록</button></>}>
       <textarea className="gbx-bc-order-input" autoFocus value={current.orderDraft} onChange={(event) => commit((state) => saveDraft(state, current.id, "orderDraft", event.target.value))} placeholder={"인스타 아이디: sample.user\n성함: 홍길동\n주소: 서울시 ...\n연락처: 01000000000"} />
     </Modal> : null}
-    {openId ? <OrderPanelV2 key={openId} broadcast={current} orderId={openId} ids={ids} onNavigate={setOpenId} onClose={() => setOpenId(null)} /> : null}
+    {openId ? <OrderPanelV2 key={openId} broadcast={current} orderId={openId} ids={ids} suggestion={suggestions.get(openId)} onNavigate={setOpenId} onClose={() => setOpenId(null)} /> : null}
   </>;
 }
 
 // ── 주문 패널 ────────────────────────────────────────────
 
-function OrderPanelV2({ broadcast, orderId, ids, onNavigate, onClose }: { broadcast: Broadcast; orderId: string; ids: string[]; onNavigate: (id: string) => void; onClose: () => void }) {
+function OrderPanelV2({ broadcast, orderId, ids, suggestion, onNavigate, onClose }: { broadcast: Broadcast; orderId: string; ids: string[]; suggestion?: CustomerSuggestion; onNavigate: (id: string) => void; onClose: () => void }) {
   const { state, commit } = useDashboard();
   const order = broadcast.orders.find((item) => item.id === orderId);
   const [frozenIds] = useState(ids);
@@ -306,6 +309,22 @@ function OrderPanelV2({ broadcast, orderId, ids, onNavigate, onClose }: { broadc
         {settlement?.items.length ? <section className="gbx-sec">
           <div className="gbx-sec-head"><h3>정산 품목</h3></div>
           <ul className="gbx-bc-items">{settlement.items.map((item, i) => <li key={`${item}-${i}`}>{item}</li>)}</ul>
+        </section> : null}
+
+        {suggestion ? <section className="gbx-sec">
+          <div className="gbx-sec-head"><h3>{suggestion.reason === "phone" ? "연락처가 같은 고객이 있어요" : "혹시 이 고객인가요?"}</h3></div>
+          <p className="gbx-help">{suggestion.reason === "phone" ? "같은 사람이면 합치세요. 이 아이디는 기존 고객에 묶이고, 고객 관리에서 분리할 수 있어요." : "아이디가 비슷해요. 같은 사람이면 연결하세요. 저장된 배송 정보가 이번 주문에 채워져요."}</p>
+          <ul className="gbx-bc-suggest">{suggestion.customers.map((customer) => {
+            const lastOrderedAt = customerLastOrderedAt(state, customer);
+            return <li key={customer.id}>
+              <div><strong>{customer.instagramId}</strong><CustomerPill customer={customer} />
+                <small>{[customer.delivery.name, customer.delivery.phone].filter(Boolean).join(" · ") || "아이디만"}{lastOrderedAt ? ` · 최근 주문 ${shortDateTime(lastOrderedAt)}` : ""}</small>
+                {customer.delivery.address ? <small>{customer.delivery.address}</small> : null}
+              </div>
+              <button type="button" className="gbx-btn sm" onClick={() => commit((current) => linkOrderToCustomer(current, broadcast.id, order.id, customer.id), `${customer.instagramId} 고객에 합쳤어요.`)}>{suggestion.reason === "phone" ? "합치기" : "연결"}</button>
+            </li>;
+          })}</ul>
+          <div className="gbx-sec-actions"><button type="button" className="gbx-link" onClick={() => commit((current) => dismissOrderSuggestion(current, order.instagramId, suggestion.customers.map((customer) => customer.id)), "다른 사람으로 표시했어요.")}>다른 사람이에요</button></div>
         </section> : null}
 
         {!order.settlementId ? <section className="gbx-sec">
