@@ -63,8 +63,10 @@ function compactKoreanAddress(value: string) {
 }
 
 function stripFieldNoise(value: string) {
+  // English labels are made of the same characters as an Instagram ID, so they
+  // count as labels only when standing alone: david, old.id and my_id stay whole.
   return cleanValue(value)
-    .replace(/(?:인스타그램?\s*아이디|인스타|instagram\s*id|아이디|id|성함|이름|주소|전화번호|연락처|휴대폰|핸드폰)\s*[:：=]*/gi, " ")
+    .replace(/(?:인스타그램?\s*아이디|인스타|(?<![a-z0-9._@])(?:instagram\s*id|id)(?![a-z0-9._])|아이디|성함|이름|주소|전화번호|연락처|휴대폰|핸드폰)\s*[:：=]*/gi, " ")
     .trim();
 }
 
@@ -244,7 +246,8 @@ function trailingShippingMessage(lines: string[]) {
 }
 
 function findParticipantId(text: string, lines: string[], participantIds: string[]) {
-  const labeledId = valueForLabels(lines, ["인스타그램(?:\\s*아이디)?", "인스타(?:\\s*아이디)?", "instagram(?:\\s*id)?", "아이디", "id"]);
+  // A line starting with idol_fan or instagram.fan is an ID, not a label plus a value.
+  const labeledId = valueForLabels(lines, ["인스타그램(?:\\s*아이디)?", "인스타(?:\\s*아이디)?", "instagram(?:\\s*id)?(?![a-z0-9._])", "아이디", "id(?![a-z0-9._])"]);
   const candidates = [labeledId, lines[0] ?? "", ...lines];
 
   if (participantIds.length === 0) {

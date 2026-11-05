@@ -44,6 +44,18 @@ test("non-settlement prose is ignored without adding errors to valid orders", ()
   assert.equal(state.broadcasts[0].orders.find((order) => order.instagramId === "case.dot")?.status, "READY");
 });
 
+test("order form for an ID containing id links to its settlement instead of creating a separate order", () => {
+  for (const instagramId of ["old.id", "david", "idol_fan"]) {
+    let { state, broadcastId } = setup([instagramId]);
+    const settlementId = state.broadcasts[0].settlements[0].id;
+    state = registerOrder(state, broadcastId, `인스타 아이디: ${instagramId}\n성함: ${info().name}\n주소: ${info().address}\n연락처: ${info().phone}`).state;
+    assert.equal(state.broadcasts[0].orders.length, 1);
+    assert.equal(state.broadcasts[0].orders[0].instagramId, instagramId);
+    assert.equal(state.broadcasts[0].orders[0].settlementId, settlementId);
+    assert.equal(state.broadcasts[0].orders[0].status, "READY");
+  }
+});
+
 test("order parser accepts dot, consecutive underscore and digit-leading IDs", () => {
   for (const instagramId of ["case.dot", "case__under", "2.case__under", "2211221_"]) {
     const parsed = parseKakaoOrder(`인스타 아이디: ${instagramId}\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678`, []);
@@ -54,6 +66,21 @@ test("order parser accepts dot, consecutive underscore and digit-leading IDs", (
   const numericOnlyLabeled = parseKakaoOrder("인스타 아이디: 2211221\n성함: 테스트나래\n주소: 테스트시 가상구 샘플로 0 101호\n연락처: 01012345678", []);
   assert.equal(numericOnlyLabeled.instagramId, "2211221");
   assert.equal(parseKakaoOrder("01012345678\n성함: 테스트나래", []).instagramId, "");
+
+  // "id" inside an Instagram ID is not a label.
+  for (const instagramId of ["david", "old.id", "my_id", "kid", "idol_fan", "id.old", "ID_Kim", "instagram.fan", "instagram_lover", "@david"]) {
+    const labeled = parseKakaoOrder(`인스타 아이디: ${instagramId}\n성함: 테스트\n주소: 테스트시 가상구 샘플로 0 1호\n연락처: 010-1234-5678`, []);
+    assert.equal(labeled.instagramId, instagramId);
+    assert.deepEqual([labeled.shippingInfo.name, labeled.shippingInfo.address, labeled.shippingInfo.phone1], ["테스트", "테스트시 가상구 샘플로 0 1호", "010-1234-5678"]);
+    assert.equal(parseKakaoOrder(`${instagramId}, 테스트\n서울시 가상구 샘플로 1\n01012345678`, []).instagramId, instagramId);
+  }
+
+  // Real labels keep working with or without a separator.
+  for (const text of ["id: david", "ID:david", "id david", "id = david", "id - david", "- id: david", "1. id: david", "id\ndavid", "아이디 david", "아이디david", "인스타: david", "인스타 아이디\ndavid", "인스타id: david", "인스타그램 아이디: david", "instagram id: david", "Instagram ID david", "instagramid: david", "instagram: david"]) {
+    assert.equal(parseKakaoOrder(`${text}\n성함: 테스트`, []).instagramId, "david", text);
+  }
+  assert.equal(parseKakaoOrder("id: old.id\n성함: 테스트", []).instagramId, "old.id");
+  assert.equal(parseKakaoOrder("instagram id idol_fan\n성함: 테스트", []).instagramId, "idol_fan");
 
   const multiLineFreeform = parseKakaoOrder("gwangsoo_m, 이광수\n광주시 동구 필문대로 1\n01077774444", []);
   assert.equal(multiLineFreeform.instagramId, "gwangsoo_m");
