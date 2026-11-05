@@ -8,7 +8,7 @@ import { mergeLegacyData } from "../app/dashboard-v2/legacy-import";
 import { createShippingWorkbook, createWorkbook } from "../app/dashboard-v2/workbook";
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
-  deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
+  deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder, revertToWaiting,
   customerDuplicateGroups, customerFor, dismissOrderSuggestion, ensureCustomer, linkOrderToCustomer, markCustomerDistinct, mergeCustomers, orderCustomerSuggestions, saveSettlement, setCustomerBlocked, splitCustomer,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
@@ -255,6 +255,38 @@ test("after an order form the same phone is suggested, and a different address a
   assert.equal(order().status, "READY");
   assert.match(customerFor(state, "main.name")?.delivery.address ?? "", /202호/);
   assert.equal(orderCustomerSuggestions(state, state.broadcasts[0]).size, 0);
+});
+
+test("saving an edit on an unpaid order keeps it waiting, and READY orders can go back to waiting", () => {
+  let { state, broadcastId } = setup(["old.case"]);
+  state = registerOrder(state, broadcastId, kakao("old.case", "101")).state;
+  const next = addBroadcast(state, "다음 방송"); state = next.state;
+  state = saveSettlement(state, next.broadcastId, "old.case - 1번 1.5");
+  const order = () => state.broadcasts.find((broadcast) => broadcast.id === next.broadcastId)!.orders[0];
+  assert.equal(order().status, "WAITING");
+  assert.equal(order().registrationConfirmed, false);
+
+  // 저장된 배송 정보로 채워진 입금 전 주문: 아이디를 고쳐 저장해도 입금 전
+  state = editOrder(state, next.broadcastId, order().id, order().delivery!, "new.case");
+  assert.equal(order().instagramId, "new.case");
+  assert.equal(order().status, "WAITING");
+  assert.equal(order().registrationConfirmed, false);
+  assert.equal(customerFor(state, "new.case"), undefined, "입금 확인 전에는 고객을 만들지 않는다");
+
+  state = confirmPreviousInfo(state, next.broadcastId, order().id);
+  assert.equal(order().status, "READY");
+  assert.ok(customerFor(state, "new.case"), "입금 확인 때 고친 아이디를 고객에 남긴다");
+
+  const delivery = order().delivery;
+  state = revertToWaiting(state, next.broadcastId, order().id);
+  assert.equal(order().status, "WAITING");
+  assert.deepEqual(order().delivery, delivery);
+  state = editOrder(state, next.broadcastId, order().id, info("909"));
+  assert.equal(order().status, "WAITING", "되돌린 주문도 저장만으로 출력 대기로 가지 않는다");
+  state = confirmPreviousInfo(state, next.broadcastId, order().id);
+  assert.equal(order().status, "READY");
+  assert.match(customerFor(state, "new.case")?.delivery.address ?? "", /909호/);
+  assert.throws(() => revertToWaiting(state, next.broadcastId, "nope"), /출력 대기 주문이 아닙니다/);
 });
 
 test("customer deletion leaves historical broadcast orders intact", () => {

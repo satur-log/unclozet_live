@@ -166,7 +166,17 @@ export function confirmPreviousInfo(state: DashboardState, broadcastId: string, 
   if (!order || order.status !== "WAITING" || order.registrationConfirmed) throw new Error("확인 가능한 과거 배송정보가 없습니다.");
   if (orderIssues(broadcast, order).length) throw new Error("필수 정보와 연결 문제를 먼저 수정하세요.");
   const next = { ...order, registrationConfirmed: true, status: "READY" as const };
-  return replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? next : o) });
+  const saved = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? next : o) });
+  // 입금 전에 고친 아이디·배송 정보도 고객에 남긴다.
+  return { ...saved, customers: updateCustomer(saved, order.instagramId, order.delivery!, broadcast.createdAt) };
+}
+
+/** 출력 대기 주문을 입금 전으로 되돌린다. 배송 정보는 그대로 두고, 입금 확인을 다시 받는다. */
+export function revertToWaiting(state: DashboardState, broadcastId: string, orderId: string) {
+  const broadcast = getBroadcast(state, broadcastId);
+  const order = broadcast.orders.find((o) => o.id === orderId);
+  if (!order || order.status !== "READY") throw new Error("출력 대기 주문이 아닙니다.");
+  return replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? { ...o, status: "WAITING" as const, registrationConfirmed: false } : o) });
 }
 
 export function editOrder(state: DashboardState, broadcastId: string, orderId: string, delivery: Delivery, draftInstagramId = "", draftShippingMessage?: string) {
@@ -181,7 +191,9 @@ export function editOrder(state: DashboardState, broadcastId: string, orderId: s
   const conflict = idChanged
     ? customer && !sameDelivery(customer.delivery, normalized) ? { previous: { ...customer.delivery }, incoming: normalized, customerId: customer.id } : null
     : order.conflict && !sameDelivery(order.conflict.previous, normalized) ? { ...order.conflict, incoming: normalized } : null;
-  const edited = { ...order, instagramId, delivery: normalized, shippingMessage: normalizeText(draftShippingMessage ?? order.shippingMessage ?? ""), extractionWarnings: [], registrationConfirmed: true, conflict };
+  // 입금 확인만 남은 주문은 정보를 고쳐 저장해도 입금 전으로 남는다.
+  const awaitingPayment = !order.registrationConfirmed && Boolean(order.delivery) && orderIssues(broadcast, order).length === 0;
+  const edited = { ...order, instagramId, delivery: normalized, shippingMessage: normalizeText(draftShippingMessage ?? order.shippingMessage ?? ""), extractionWarnings: [], registrationConfirmed: !awaitingPayment, conflict };
   const refreshed = refreshStatus(broadcast, edited);
   const next = replaceBroadcast(state, { ...broadcast, orders: broadcast.orders.map((o) => o.id === orderId ? refreshed : o) });
   return refreshed.status === "READY" ? { ...next, customers: updateCustomer(next, instagramId, normalized, broadcast.createdAt) } : next;

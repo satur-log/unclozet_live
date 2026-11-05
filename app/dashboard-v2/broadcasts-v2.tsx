@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerFor, customerLastOrderedAt, customerStatusLabel, dismissOrderSuggestion, ensureCustomer, linkOrderToCustomer, orderCustomerSuggestions, setCustomerBlocked, deleteBroadcast, deliveryIssues, editOrder, exportReadyOrders, matchOrder, matchingCandidates, orderIssues,
-  registerOrder, renameBroadcast, resolveConflict, restoreOrder, saveDraft, saveSettlement, statusLabels, type CustomerSuggestion,
+  registerOrder, renameBroadcast, resolveConflict, restoreOrder, revertToWaiting, saveDraft, saveSettlement, statusLabels, type CustomerSuggestion,
 } from "./model";
 import { analyzeSettlement } from "./settlement";
 import type { Broadcast, Customer, Delivery, Order, OrderStatus } from "./types";
@@ -351,7 +351,7 @@ function OrderPanelV2({ broadcast, orderId, ids, suggestion, onNavigate, onClose
         </section> : null}
 
         <section className="gbx-sec">
-          <div className="gbx-sec-head"><h3>주문 정보</h3><span className="gbx-help">{order.status === "READY" ? "출력 대기 상태에서도 수정할 수 있어요" : order.status === "COMPLETED" ? "재출력하려면 출력 대기로 되돌리세요" : "누락된 정보를 채우면 자동으로 출력 대기가 돼요"}</span></div>
+          <div className="gbx-sec-head"><h3>주문 정보</h3><span className="gbx-help">{order.status === "READY" ? "출력 대기 상태에서도 수정할 수 있어요" : order.status === "COMPLETED" ? "재출력하려면 출력 대기로 되돌리세요" : confirmable(broadcast, order) ? "저장해도 입금 전으로 남아요. 입금을 확인하면 출력 대기로 가요" : "누락된 정보를 채우면 자동으로 출력 대기가 돼요"}</span></div>
           <div className="gbx-form">
             <label>인스타그램 아이디<input value={instagramId} disabled={!editable} onChange={(e) => setInstagramId(e.target.value)} placeholder="instagram_id" /></label>
             <label>받는분 성명<input value={delivery.name} disabled={!editable} onChange={(e) => setDelivery({ ...delivery, name: e.target.value })} /></label>
@@ -360,7 +360,7 @@ function OrderPanelV2({ broadcast, orderId, ids, suggestion, onNavigate, onClose
             <label className="full">배송 메시지<input value={shippingMessage} disabled={!editable} onChange={(e) => setShippingMessage(e.target.value)} placeholder="예: 문 앞에 놓아주세요" /></label>
           </div>
           {editable && fieldIssues.length ? <p className="gbx-bc-field-issues">{fieldIssues.map((issue) => issue.message).join(" · ")}</p> : null}
-          {editable ? <div className="gbx-sec-actions"><button type="button" className="gbx-btn primary" disabled={!dirty && order.registrationConfirmed} onClick={save}>저장</button></div> : null}
+          {editable ? <div className="gbx-sec-actions"><button type="button" className="gbx-btn primary" disabled={!dirty && (order.registrationConfirmed || confirmable(broadcast, order))} onClick={save}>저장</button></div> : null}
         </section>
 
         <CustomerCheckSection instagramId={order.instagramId} />
@@ -377,7 +377,7 @@ function OrderPanelV2({ broadcast, orderId, ids, suggestion, onNavigate, onClose
           : order.status === "COMPLETED"
             ? <><span className="gbx-foot-note">택배 엑셀로 내보낸 주문이에요</span><button type="button" className="gbx-btn" onClick={() => commit((state) => restoreOrder(state, broadcast.id, order.id), "출력 대기로 되돌렸습니다.")}>출력 대기로 되돌리기</button></>
             : order.status === "READY"
-              ? <span className="gbx-foot-note">배송정보 확인됨 · 다음 택배 엑셀에 들어가요</span>
+              ? <><span className="gbx-foot-note">배송정보 확인됨 · 다음 택배 엑셀에 들어가요</span><button type="button" className="gbx-btn" onClick={() => commit((state) => revertToWaiting(state, broadcast.id, order.id), "입금 전으로 되돌렸습니다.")}>입금 전으로 되돌리기</button></>
               : <span className="gbx-foot-note">{order.delivery ? "필수 정보와 연결 문제를 먼저 고쳐 주세요" : "주문서를 받으면 배송정보가 채워져요"}</span>}
       </footer>
     </aside>
