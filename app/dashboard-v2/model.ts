@@ -45,8 +45,12 @@ function refreshStatus(broadcast: Broadcast, order: Order): Order {
   return { ...order, status: order.registrationConfirmed && orderIssues(broadcast, order).length === 0 ? "READY" : "WAITING" };
 }
 
+/** 이 고객의 모든 아이디(대표 + 합쳐진 아이디). */
+export const customerIds = (customer: Customer) => [customer.instagramId, ...(customer.mergedCustomers ?? []).map((merged) => merged.instagramId)].map(canonicalInstagramId);
+
 export function customerFor(state: DashboardState, instagramId: string) {
-  return state.customers.find((customer) => sameId(customer.instagramId, instagramId));
+  const key = canonicalInstagramId(instagramId);
+  return state.customers.find((customer) => customerIds(customer).includes(key));
 }
 
 /** 아이디만 저장된 고객(주문서 없이 체크·차단만 해둔 경우)인지. */
@@ -264,7 +268,7 @@ export function editCustomer(state: DashboardState, customerId: string, delivery
   if (!customer) throw new Error("고객 정보를 찾을 수 없습니다.");
   const instagramId = canonicalInstagramId(draftInstagramId || customer.instagramId);
   if (!instagramId) throw new Error("인스타그램 아이디를 입력하세요.");
-  if (state.customers.some((item) => item.id !== customerId && sameId(item.instagramId, instagramId))) throw new Error("이미 저장된 인스타그램 아이디입니다.");
+  if (state.customers.some((item) => item.id !== customerId && customerIds(item).includes(instagramId))) throw new Error("이미 저장된 인스타그램 아이디입니다.");
   const lastOrderedAt = customerLastOrderedAt(state, customer);
   return { ...state, customers: state.customers.map((item) => item.id === customerId ? { ...item, instagramId, delivery: normalized, updatedAt: now(), lastOrderedAt: lastOrderedAt ?? item.lastOrderedAt } : item) };
 }
@@ -295,21 +299,24 @@ export function customerStatusLabel(customer: Customer) {
 
 export function customerLastOrderedAt(state: DashboardState, customer: Customer) {
   let latest: string | null = customer.lastOrderedAt ?? null;
+  const ids = new Set(customerIds(customer));
   for (const broadcast of state.broadcasts) {
-    if (broadcast.orders.some((order) => sameId(order.instagramId, customer.instagramId)) && (!latest || broadcast.createdAt > latest)) latest = broadcast.createdAt;
+    if (broadcast.orders.some((order) => ids.has(canonicalInstagramId(order.instagramId))) && (!latest || broadcast.createdAt > latest)) latest = broadcast.createdAt;
   }
   return latest;
 }
 
 export function customerOrderHistory(state: DashboardState, customer: Customer) {
+  const ids = new Set(customerIds(customer));
   return state.broadcasts.flatMap((broadcast) => broadcast.orders
-    .filter((order) => sameId(order.instagramId, customer.instagramId))
+    .filter((order) => ids.has(canonicalInstagramId(order.instagramId)))
     .map((order) => {
       const settlement = broadcast.settlements.find((item) => item.id === order.settlementId);
       return {
         id: `${broadcast.id}:${order.id}`,
         broadcastId: broadcast.id,
         broadcastTitle: broadcast.title,
+        instagramId: order.instagramId,
         orderedAt: broadcast.createdAt,
         status: order.status,
         total: settlement?.total ?? null,
@@ -371,15 +378,110 @@ export function importCustomers(state: DashboardState, records: CustomerImportRe
   const importedAt = now();
   const incoming = new Map(records.map((record) => [canonicalInstagramId(record.instagramId), record]));
   const customers = state.customers.map((customer) => {
-    const key = canonicalInstagramId(customer.instagramId);
-    const record = incoming.get(key);
-    if (!record) return customer;
-    incoming.delete(key);
+    const keys = customerIds(customer).filter((key) => incoming.has(key));
+    if (!keys.length) return customer;
+    const record = incoming.get(keys[0])!;
+    for (const key of keys) incoming.delete(key);
     if (sameDelivery(customer.delivery, record.delivery)) return customer;
-    return { ...customer, instagramId: record.instagramId, delivery: normalizedDelivery(record.delivery), updatedAt: importedAt };
+    // 합쳐진 아이디로 온 행은 대표 아이디를 바꾸지 않는다.
+    return { ...customer, instagramId: sameId(customer.instagramId, record.instagramId) ? record.instagramId : customer.instagramId, delivery: normalizedDelivery(record.delivery), updatedAt: importedAt };
   });
   for (const record of incoming.values()) {
     customers.unshift({ id: id(), instagramId: record.instagramId, delivery: normalizedDelivery(record.delivery), updatedAt: importedAt, blocked: false, legacyCheckCount: 0, checkHistory: [] });
   }
   return { state: { ...state, customers }, summary };
+}
+
+// ── 중복 고객 ─────────────────────────────────────────────
+
+export type DuplicateGroup = { customers: Customer[]; samePhone: boolean; sameName: boolean };
+
+const phoneKey = (customer: Customer) => { const digits = customer.delivery.phone.replace(/\D/g, ""); return digits.length >= 10 ? digits : ""; };
+const idShape = (customer: Customer) => canonicalInstagramId(customer.instagramId).replace(/[._]/g, "");
+const markedDistinct = (a: Customer, b: Customer) => Boolean(a.distinctFrom?.includes(b.id) || b.distinctFrom?.includes(a.id));
+
+/** 연락처가 같거나, 아이디가 점·밑줄만 다르거나, 5자 이상에서 한 글자만 다른 고객 묶음. 합칠지는 사람이 확인한다. 최근 주문 순. */
+export function customerDuplicateGroups(state: DashboardState): DuplicateGroup[] {
+  const { customers } = state;
+  // 전체 쌍을 비교하지 않도록 같은 사람일 수 있는 고객끼리만 모은다. 한 글자 차이는 한 글자를 지운 모양이 겹친다.
+  const buckets = new Map<string, number[]>();
+  const add = (key: string, index: number) => { const bucket = buckets.get(key); if (bucket) bucket.push(index); else buckets.set(key, [index]); };
+  customers.forEach((customer, index) => {
+    const phone = phoneKey(customer); const shape = idShape(customer); const instagramId = canonicalInstagramId(customer.instagramId);
+    if (phone) add(`phone:${phone}`, index);
+    if (shape) add(`shape:${shape}`, index);
+    if (instagramId.length < 5) return;
+    add(`near:${instagramId}`, index);
+    for (let at = 0; at < instagramId.length; at += 1) add(`near:${instagramId.slice(0, at)}${instagramId.slice(at + 1)}`, index);
+  });
+  const parent = customers.map((_, index) => index);
+  const root = (index: number): number => { while (parent[index] !== index) { parent[index] = parent[parent[index]]; index = parent[index]; } return index; };
+  for (const [key, members] of buckets) {
+    for (let i = 0; i < members.length; i += 1) for (let j = i + 1; j < members.length; j += 1) {
+      const a = customers[members[i]]; const b = customers[members[j]];
+      if (markedDistinct(a, b)) continue;
+      if (key.startsWith("near:")) {
+        const left = canonicalInstagramId(a.instagramId); const right = canonicalInstagramId(b.instagramId);
+        if (Math.min(left.length, right.length) < 5 || distance(left, right) > 1) continue;
+      }
+      parent[root(members[j])] = root(members[i]);
+    }
+  }
+  const groups = new Map<number, Customer[]>();
+  customers.forEach((customer, index) => { const key = root(index); groups.set(key, [...(groups.get(key) ?? []), customer]); });
+  const found = [...groups.values()].filter((group) => group.length > 1);
+  const latest = new Map(found.flat().map((customer) => [customer.id, customerLastOrderedAt(state, customer) ?? ""]));
+  const byLatest = (a: Customer, b: Customer) => latest.get(b.id)!.localeCompare(latest.get(a.id)!);
+  return found.map((group) => {
+    const names = new Set(group.map((customer) => normalizeText(customer.delivery.name)).filter(Boolean));
+    return { customers: [...group].sort(byLatest), samePhone: Boolean(phoneKey(group[0])) && group.every((customer) => phoneKey(customer) === phoneKey(group[0])), sameName: names.size <= 1 };
+  }).sort((a, b) => byLatest(a.customers[0], b.customers[0]));
+}
+
+/**
+ * 고객들을 대표 고객 하나로 합친다. 대표의 아이디·배송 정보가 남고(대표에 배송 정보가 없으면 채운다), 체크·차단은 모은다.
+ * 방송 주문은 바꾸지 않으므로 splitCustomer로 되돌릴 수 있다.
+ */
+export function mergeCustomers(state: DashboardState, mainId: string, sourceIds: string[]) {
+  const main = state.customers.find((customer) => customer.id === mainId);
+  const sources = state.customers.filter((customer) => customer.id !== mainId && sourceIds.includes(customer.id));
+  if (!main || !sources.length) throw new Error("합칠 고객을 찾을 수 없습니다.");
+  const involved = new Set([main.id, ...sources.map((source) => source.id)]);
+  const merged: Customer = {
+    ...main,
+    delivery: hasSavedDelivery(main) ? main.delivery : { ...(sources.find(hasSavedDelivery)?.delivery ?? main.delivery) },
+    blocked: [main, ...sources].some((customer) => customer.blocked),
+    legacyCheckCount: [main, ...sources].reduce((sum, customer) => sum + Math.max(0, customer.legacyCheckCount ?? 0), 0),
+    checkHistory: [main, ...sources].flatMap((customer) => customer.checkHistory ?? []),
+    lastOrderedAt: [main, ...sources].map((customer) => customer.lastOrderedAt).filter((value): value is string => Boolean(value)).sort().at(-1),
+    mergedCustomers: [...(main.mergedCustomers ?? []), ...sources.flatMap(({ mergedCustomers = [], ...source }) => [source, ...mergedCustomers])],
+    distinctFrom: [...new Set([main, ...sources].flatMap((customer) => customer.distinctFrom ?? []))].filter((id) => !involved.has(id)),
+    updatedAt: now(),
+  };
+  return { ...state, customers: state.customers.filter((customer) => !sources.includes(customer)).map((customer) => customer.id === main.id ? merged : customer) };
+}
+
+/** 합쳐진 아이디를 다시 별도 고객으로 되돌린다. 합친 뒤에 추가한 체크는 대표에 남는다. */
+export function splitCustomer(state: DashboardState, customerId: string, mergedId: string) {
+  const main = state.customers.find((customer) => customer.id === customerId);
+  const snapshot = main?.mergedCustomers?.find((customer) => customer.id === mergedId);
+  if (!main || !snapshot) throw new Error("되돌릴 고객을 찾을 수 없습니다.");
+  const movedChecks = new Set((snapshot.checkHistory ?? []).map((check) => check.id));
+  const restored: Customer = { ...snapshot, distinctFrom: [...(snapshot.distinctFrom ?? []), main.id], updatedAt: now() };
+  const remaining: Customer = {
+    ...main,
+    mergedCustomers: main.mergedCustomers!.filter((customer) => customer.id !== mergedId),
+    legacyCheckCount: Math.max(0, (main.legacyCheckCount ?? 0) - (snapshot.legacyCheckCount ?? 0)),
+    checkHistory: (main.checkHistory ?? []).filter((check) => !movedChecks.has(check.id)),
+    // 최근 주문이 되돌린 고객 것이었으면 비워서 남은 주문으로 다시 계산되게 한다.
+    lastOrderedAt: main.lastOrderedAt === snapshot.lastOrderedAt ? undefined : main.lastOrderedAt,
+    distinctFrom: [...(main.distinctFrom ?? []), snapshot.id],
+    updatedAt: now(),
+  };
+  return { ...state, customers: [restored, ...state.customers.map((customer) => customer.id === main.id ? remaining : customer)] };
+}
+
+/** "다른 사람"으로 표시해 이 고객을 묶음의 나머지 고객들과 함께 추천하지 않는다. */
+export function markCustomerDistinct(state: DashboardState, customerId: string, otherIds: string[]) {
+  return updateCustomerRecord(state, customerId, (customer) => ({ ...customer, distinctFrom: [...new Set([...(customer.distinctFrom ?? []), ...otherIds])], updatedAt: now() }));
 }

@@ -119,6 +119,23 @@ body:has(.gbx-bc) .v2-toast > span { background: none; }
 .gbx-cu-check-actions { display: inline-flex; gap: 4px; }
 .gbx-cu-check-form { margin-top: 10px; padding: 12px; background: var(--x-soft); }
 .gbx-cu-checks .gbx-cu-check-form { margin-top: 0; }
+.gbx-cu-more { margin-left: 6px; color: var(--x-muted); font-size: 12px; font-weight: 400; }
+.gbx-cu-dups { display: grid; gap: 12px; }
+.gbx-cu-dup { padding: 14px 16px; border: 1px solid #e5e5e5; border-radius: 3px; background: #fff; }
+.gbx-panel .gbx-cu-dup { padding: 0; border: 0; }
+.gbx-cu-dup-reason { margin: 0 0 6px; color: #555; font-size: 12.5px; }
+.gbx-cu-dup-reason b { color: var(--x-red); font-weight: 500; }
+.gbx-cu-dup ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.gbx-cu-dup li { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 0; border-top: 1px solid #f0f0f0; }
+.gbx-cu-dup label { display: flex; align-items: flex-start; gap: 10px; min-width: 0; cursor: pointer; }
+.gbx-cu-dup label input { flex: none; margin: 3px 0 0; accent-color: var(--x-ink); }
+.gbx-cu-dup label > span { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; font-size: 13.5px; }
+.gbx-cu-dup label em { padding: 0 5px; border: 1px solid var(--x-ink); border-radius: 3px; font-size: 11px; font-style: normal; line-height: 16px; }
+.gbx-cu-dup label small { flex-basis: 100%; overflow-wrap: anywhere; color: var(--x-muted); font-size: 12px; }
+.gbx-cu-dup-actions { display: inline-flex; flex: none; gap: 10px; }
+.gbx-cu-dup-foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding-top: 10px; border-top: 1px solid #f0f0f0; }
+.gbx-cu-merged { display: grid; margin: 0; padding: 0; list-style: none; }
+.gbx-cu-merged li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #f0f0f0; font-size: 13.5px; }
 .gbx-cu-empty { margin: 10px 0 0; color: var(--x-muted); font-size: 12.5px; }
 .gbx-cu-history { display: grid; margin: 0; padding: 0; list-style: none; }
 .gbx-cu-history li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid #f0f0f0; }

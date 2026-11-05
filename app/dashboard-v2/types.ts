@@ -10,6 +10,10 @@ export type Customer = {
   blocked?: boolean;
   legacyCheckCount?: number;
   checkHistory?: CustomerCheck[];
+  /** 이 고객으로 합쳐진 고객의 합치기 전 모습. 그 아이디로 온 주문도 이 고객으로 묶고, 분리할 때 되살린다. */
+  mergedCustomers?: Customer[];
+  /** "다른 사람"으로 확인한 고객 id. 중복 추천에서 뺀다. */
+  distinctFrom?: string[];
 };
 export type Settlement = {
   id: string;

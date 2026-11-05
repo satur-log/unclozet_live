@@ -7,7 +7,9 @@ type StoragePort = Pick<Storage, "getItem" | "setItem">;
 const record = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v));
 const strings = (v: unknown, keys: string[]) => record(v) && keys.every((k) => typeof v[k] === "string");
 const delivery = (v: unknown): v is Delivery => strings(v, ["name", "address", "phone"]);
-const customerState = (v: unknown) => record(v)
+const customerState = (v: unknown): boolean => record(v)
+  && (v.mergedCustomers === undefined || (Array.isArray(v.mergedCustomers) && v.mergedCustomers.every((c: unknown) => strings(c, ["id", "instagramId", "updatedAt"]) && delivery((c as Record<string, unknown>).delivery) && customerState(c))))
+  && (v.distinctFrom === undefined || (Array.isArray(v.distinctFrom) && v.distinctFrom.every((item: unknown) => typeof item === "string")))
   && (v.lastOrderedAt === undefined || typeof v.lastOrderedAt === "string")
   && (v.blocked === undefined || typeof v.blocked === "boolean")
   && (v.legacyCheckCount === undefined || (typeof v.legacyCheckCount === "number" && Number.isInteger(v.legacyCheckCount) && v.legacyCheckCount >= 0))

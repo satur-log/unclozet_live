@@ -9,7 +9,7 @@ import { createShippingWorkbook, createWorkbook } from "../app/dashboard-v2/work
 import {
   addBroadcast, addCustomerCheck, confirmPreviousInfo, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteBroadcast, deleteCustomer,
   deleteCustomerCheck, editCustomer, editCustomerCheck, editOrder, exportReadyOrders, importCustomers, registerOrder, resolveConflict, restoreOrder,
-  ensureCustomer, saveSettlement, setCustomerBlocked,
+  customerDuplicateGroups, customerFor, ensureCustomer, markCustomerDistinct, mergeCustomers, saveSettlement, setCustomerBlocked, splitCustomer,
 } from "../app/dashboard-v2/model";
 import { createMockState } from "../app/dashboard-v2/mock-data";
 import { hasMeaningfulDashboardChange, isDashboardState, loadMockState, saveMockState, STORAGE_KEY } from "../app/dashboard-v2/repository";
@@ -149,6 +149,70 @@ test("READY information remains editable and export handles every READY order at
   assert.equal(state.broadcasts[0].orders.filter((o) => o.status === "COMPLETED").length, 2);
   state = restoreOrder(state, broadcastId, order.id);
   assert.equal(state.broadcasts[0].orders.find((o) => o.id === order.id)?.status, "READY");
+});
+
+test("duplicate customers: same phone or similar ID is suggested, 다른 사람 removes it", () => {
+  const delivery = (name: string, phone: string): Delivery => ({ name, address: "서울시 샘플구 1", phone });
+  const person = (id: string, instagramId: string, d: Delivery, lastOrderedAt?: string) => ({ id, instagramId, delivery: d, updatedAt: "2026-01-01T00:00:00.000Z", lastOrderedAt });
+  const state: DashboardState = { ...emptyState(), customers: [
+    person("a", "M.oon_", delivery("가", "010-1111-1111"), "2026-01-01"), person("b", "totally.other", delivery("가", "01011111111"), "2026-02-01"),
+    person("c", "m_oon", delivery("나", "010-2222-2222")), person("d", "someone1", delivery("다", "010-3333-3333")), person("e", "someone2", delivery("라", "010-4444-4444")),
+    person("f", "moon", delivery("", "")), person("g", "noon", delivery("마", "010-5555-5555")),
+  ] };
+  const groups = customerDuplicateGroups(state);
+  assert.deepEqual(groups.map((group) => group.customers.map((customer) => customer.id).sort().join()).sort(), ["a,b,c,f", "d,e"]);
+  const first = groups.find((group) => group.customers.some((customer) => customer.id === "a"))!;
+  assert.equal(first.customers[0].id, "b", "가장 최근 주문이 먼저");
+  assert.equal(first.samePhone, false);
+  assert.equal(groups.find((group) => group.customers.some((customer) => customer.id === "d"))!.sameName, false);
+  const dismissed = markCustomerDistinct(state, "e", ["d"]);
+  assert.equal(customerDuplicateGroups(dismissed).some((group) => group.customers.some((customer) => customer.id === "d")), false);
+});
+
+const kakao = (instagramId: string, room: string) => `인스타 아이디: ${instagramId}\n성함: ${info(room).name}\n주소: ${info(room).address}\n연락처: ${info(room).phone}`;
+
+test("merging customers keeps the main ID, links old IDs to it, and can be split back", () => {
+  let { state, broadcastId } = setup(["M.oon_", "M_.oon"]);
+  state = registerOrder(state, broadcastId, kakao("M.oon_", "101")).state;
+  state = registerOrder(state, broadcastId, kakao("M_.oon", "202")).state;
+  const main = customerFor(state, "M.oon_")!; const other = customerFor(state, "M_.oon")!;
+  state = addCustomerCheck(state, other.id, "2026-01-02", "미입금");
+  state = setCustomerBlocked(state, other.id, true);
+  const before = state;
+
+  state = mergeCustomers(state, main.id, [other.id]);
+  assert.equal(state.customers.length, before.customers.length - 1);
+  const merged = customerFor(state, "M_.oon")!;
+  assert.equal(merged.id, main.id, "예전 아이디도 대표 고객으로 찾는다");
+  assert.equal(merged.instagramId, "M.oon_");
+  assert.match(merged.delivery.address, /101호/);
+  assert.equal(merged.blocked, true);
+  assert.equal(customerCheckCount(merged), 1);
+  assert.equal(customerOrderHistory(state, merged).length, 2);
+  assert.deepEqual(state.broadcasts, before.broadcasts, "방송 주문은 바꾸지 않는다");
+  assert.ok(isDashboardState(state));
+  const third = ensureCustomer(state, "third.case");
+  assert.throws(() => editCustomer(third.state, third.customerId, info(), "m_.oon"), /이미 저장된/);
+  assert.equal(ensureCustomer(state, "M_.oon").customerId, main.id);
+  assert.equal(importCustomers(state, [{ instagramId: "M_.oon", delivery: info("909"), row: 2 }]).state.customers.length, state.customers.length, "엑셀의 예전 아이디도 새 고객을 만들지 않는다");
+  assert.equal(importCustomers(state, [{ instagramId: "M_.oon", delivery: info("909"), row: 2 }]).state.customers.find((customer) => customer.id === main.id)!.instagramId, "M.oon_");
+
+  // 다음 방송에서 예전 아이디로 주문해도 갈라지지 않는다
+  const next = addBroadcast(state, "다음 방송"); state = next.state;
+  state = saveSettlement(state, next.broadcastId, "M_.oon - 1번 1.5");
+  state = registerOrder(state, next.broadcastId, kakao("M_.oon", "101")).state;
+  assert.equal(state.customers.filter((customer) => customer.instagramId === "M_.oon").length, 0);
+  assert.equal(customerOrderHistory(state, customerFor(state, "M.oon_")!).length, 3);
+
+  state = splitCustomer(state, main.id, other.id);
+  const restored = customerFor(state, "M_.oon")!;
+  assert.equal(restored.id, other.id);
+  assert.match(restored.delivery.address, /202호/);
+  assert.equal(restored.blocked, true);
+  assert.equal(customerCheckCount(restored), 1);
+  assert.equal(customerCheckCount(customerFor(state, "M.oon_")!), 0);
+  assert.equal(customerDuplicateGroups(state).some((group) => group.customers.some((customer) => customer.id === other.id)), false, "분리한 고객은 다시 추천하지 않는다");
+  assert.ok(isDashboardState(state));
 });
 
 test("customer deletion leaves historical broadcast orders intact", () => {

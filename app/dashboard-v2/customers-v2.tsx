@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import readXlsxFile from "read-excel-file/browser";
 import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import {
-  addCustomerCheck, customerCheckCount, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteCustomer, deleteCustomerCheck,
-  editCustomer, editCustomerCheck, ensureCustomer, hasSavedDelivery, importCustomers, setCustomerBlocked, summarizeCustomerImport,
+  addCustomerCheck, customerCheckCount, customerDuplicateGroups, customerIds, customerLastOrderedAt, customerOrderHistory, customerStatusLabel, deleteCustomer, deleteCustomerCheck,
+  editCustomer, editCustomerCheck, ensureCustomer, hasSavedDelivery, importCustomers, markCustomerDistinct, mergeCustomers, setCustomerBlocked, splitCustomer, summarizeCustomerImport,
+  type DuplicateGroup,
 } from "./model";
 import { parseCustomerWorkbookRows } from "./customer-import";
 import type { Customer, CustomerCheck, CustomerImportRecord, CustomerImportSummary } from "./types";
@@ -27,9 +28,39 @@ const orderDate = (value: string | null) => {
 
 type SortKey = "instagramId" | "name" | "phone" | "address" | "status" | "lastOrderedAt";
 type Item = { customer: Customer; lastOrderedAt: string | null };
-type View = "all" | "checked" | "blocked";
+type View = "all" | "checked" | "blocked" | "duplicates";
 const sortValue = (item: Item, key: SortKey) => key === "instagramId" ? item.customer.instagramId : key === "name" ? item.customer.delivery.name : key === "phone" ? item.customer.delivery.phone
   : key === "address" ? item.customer.delivery.address : key === "status" ? customerStatusLabel(item.customer) : item.lastOrderedAt ?? "";
+
+/** 같은 사람일 수 있는 고객 묶음. 대표를 골라 합치거나, 다른 사람을 빼낸다. */
+function DuplicateCard({ group, onOpen, onMerged }: { group: DuplicateGroup; onOpen?: (id: string) => void; onMerged?: (mainId: string) => void }) {
+  const { state, commit } = useDashboard();
+  const [picked, setPicked] = useState(group.customers[0].id);
+  const mainId = group.customers.some((customer) => customer.id === picked) ? picked : group.customers[0].id;
+  const allIds = group.customers.map((customer) => customer.id);
+  const others = allIds.filter((id) => id !== mainId);
+  function merge() {
+    if (commit((current) => mergeCustomers(current, mainId, others), `${group.customers.length}명을 한 고객으로 합쳤어요.`)) onMerged?.(mainId);
+  }
+  return <div className="gbx-cu-dup">
+    <p className="gbx-cu-dup-reason">{group.samePhone ? "연락처가 같아요" : "아이디가 비슷해요 · 연락처는 달라요"}{group.sameName ? "" : <b> · 이름이 달라요. 가족이나 공용 번호일 수 있어요</b>}</p>
+    <ul>{group.customers.map((customer) => {
+      const lastOrderedAt = customerLastOrderedAt(state, customer);
+      return <li key={customer.id}>
+        <label><input type="radio" name={`dup-${allIds[0]}`} checked={customer.id === mainId} onChange={() => setPicked(customer.id)} aria-label={`${customer.instagramId}를 대표로`} />
+          <span><strong>{customer.instagramId}</strong>{customer.id === mainId ? <em>대표</em> : null}<CustomerPill customer={customer} />
+            <small>{[customer.delivery.name, customer.delivery.phone].filter(Boolean).join(" · ") || "아이디만"} · {orderDate(lastOrderedAt)} · 주문 {customerOrderHistory(state, customer).length}건</small>
+            {customer.delivery.address ? <small title={customer.delivery.address}>{customer.delivery.address}</small> : null}
+          </span></label>
+        <span className="gbx-cu-dup-actions">
+          {onOpen ? <button type="button" className="gbx-link" onClick={() => onOpen(customer.id)}>상세</button> : null}
+          <button type="button" className="gbx-link" onClick={() => commit((current) => markCustomerDistinct(current, customer.id, allIds.filter((id) => id !== customer.id)), `${customer.instagramId}는 다른 사람으로 표시했어요.`)}>다른 사람</button>
+        </span>
+      </li>;
+    })}</ul>
+    <div className="gbx-cu-dup-foot"><span className="gbx-help">대표의 아이디와 배송 정보가 남고, 주문·체크는 모여요. 나중에 분리할 수 있어요.</span><button type="button" className="gbx-btn primary sm" onClick={merge}>{group.customers.length}명 합치기</button></div>
+  </div>;
+}
 
 function CustomersPage() {
   const { state, commit, notify } = useDashboard();
@@ -50,16 +81,19 @@ function CustomersPage() {
   }, [openId, importDraft]);
 
   const all = useMemo(() => state.customers.map((customer) => ({ customer, lastOrderedAt: customerLastOrderedAt(state, customer) })), [state]);
-  const counts: Record<View, number> = { all: all.length, checked: all.filter(({ customer }) => !customer.blocked && customerCheckCount(customer) > 0).length, blocked: all.filter(({ customer }) => customer.blocked).length };
+  const duplicates = useMemo(() => customerDuplicateGroups(state), [state]);
+  const counts: Record<View, number> = { all: all.length, checked: all.filter(({ customer }) => !customer.blocked && customerCheckCount(customer) > 0).length, blocked: all.filter(({ customer }) => customer.blocked).length, duplicates: duplicates.length };
+  const matches = (customer: Customer) => !query.trim() || customerIds(customer).some((id) => id.includes(query.trim().toLowerCase())) || customer.delivery.name.includes(query);
   const list = useMemo(() => all
     .filter(({ customer }) => view === "all" || (view === "blocked" ? customer.blocked : !customer.blocked && customerCheckCount(customer) > 0))
-    .filter(({ customer }) => !query.trim() || customer.instagramId.toLowerCase().includes(query.toLowerCase()) || customer.delivery.name.includes(query))
+    .filter(({ customer }) => matches(customer))
     .sort((a, b) => {
       const comparison = sortValue(a, sort.key).localeCompare(sortValue(b, sort.key), "ko", { numeric: true, sensitivity: "base" });
       if (comparison) return sort.direction === "asc" ? comparison : -comparison;
       return a.customer.instagramId.localeCompare(b.customer.instagramId, "ko", { numeric: true, sensitivity: "base" });
     }), [all, view, query, sort]);
-  const ids = list.map(({ customer }) => customer.id);
+  const shownGroups = duplicates.filter((group) => group.customers.some(matches));
+  const ids = view === "duplicates" ? shownGroups.flatMap((group) => group.customers.map((customer) => customer.id)) : list.map(({ customer }) => customer.id);
 
   const changeSort = (key: SortKey) => setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
   const head = (label: string, key: SortKey) => {
@@ -109,16 +143,19 @@ function CustomersPage() {
       <label className="gbx-search"><Search /><input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="인스타그램 ID 또는 이름 검색" aria-label="고객 검색" />{query ? <button type="button" aria-label="검색어 지우기" onClick={() => setQuery("")}><X /></button> : <kbd>/</kbd>}</label>
     </div>
     <div className="gbx-filters">
-      <div className="gbx-chips" role="tablist" aria-label="고객 상태">{([["all", "전체"], ["checked", "체크 있음"], ["blocked", "차단"]] as const).map(([key, label]) =>
+      <div className="gbx-chips" role="tablist" aria-label="고객 상태">{([["all", "전체"], ["checked", "체크 있음"], ["blocked", "차단"], ["duplicates", "중복 의심"]] as const).map(([key, label]) =>
         <button key={key} type="button" role="tab" aria-selected={view === key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}<b>{counts[key]}</b></button>)}</div>
     </div>
 
-    <div className="gbx-table-wrap">
+    {view === "duplicates" ? <div className="gbx-cu-dups">
+      {shownGroups.map((group) => <DuplicateCard key={group.customers.map((customer) => customer.id).sort().join()} group={group} onOpen={setOpenId} />)}
+      {!shownGroups.length ? <div className="gbx-empty-row">{query ? <>‘{query}’에 맞는 묶음이 없어요. <button type="button" onClick={() => setQuery("")}>검색어 지우기</button></> : "중복이 의심되는 고객이 없어요."}</div> : null}
+    </div> : <div className="gbx-table-wrap">
       <table className="gbx-table gbx-cu-table">
         <colgroup><col className="c-id" /><col className="c-name" /><col className="c-phone" /><col /><col className="c-stage" /><col className="c-date" /><col className="c-arrow" /></colgroup>
         <thead><tr>{head("인스타그램 아이디", "instagramId")}{head("이름", "name")}{head("연락처", "phone")}{head("주소", "address")}{head("상태", "status")}{head("최근 주문", "lastOrderedAt")}<th><span className="sr-only">상세</span></th></tr></thead>
         <tbody>{list.map(({ customer, lastOrderedAt }) => <tr key={customer.id} className={`${openId === customer.id ? "open" : ""} ${customer.blocked ? "late" : ""}`} onClick={() => setOpenId(customer.id)}>
-          <td><strong>{customer.instagramId}</strong></td>
+          <td><strong>{customer.instagramId}</strong>{customer.mergedCustomers?.length ? <span className="gbx-cu-more" title={customer.mergedCustomers.map((merged) => merged.instagramId).join(", ")}>외 {customer.mergedCustomers.length}</span> : null}</td>
           <td>{customer.delivery.name || <span className="gbx-muted">{hasSavedDelivery(customer) ? "—" : "아이디만"}</span>}</td>
           <td className="gbx-mono">{customer.delivery.phone || <span className="gbx-muted">—</span>}</td>
           <td title={customer.delivery.address}>{customer.delivery.address || <span className="gbx-muted">—</span>}</td>
@@ -129,7 +166,7 @@ function CustomersPage() {
       </table>
       {!list.length ? <div className="gbx-empty-row">{query ? <>‘{query}’에 맞는 고객이 없어요. <button type="button" onClick={() => setQuery("")}>검색어 지우기</button></>
         : view !== "all" ? "이 상태의 고객이 없어요." : <>저장된 고객 정보가 없어요. 주문서를 등록하거나 기존 양식의 엑셀을 업로드해 고객정보를 저장하세요. <button type="button" onClick={() => fileRef.current?.click()}>엑셀 업로드</button></>}</div> : null}
-    </div>
+    </div>}
 
     {adding != null ? <Modal title="아이디로 고객 추가" description="주문서를 안 쓴 사람도 아이디만 저장해 두면 체크·차단을 이어갈 수 있어요. 배송정보는 나중에 주문서가 오면 채워져요." onClose={() => setAdding(null)}
       footer={<><button type="button" className="gbx-btn ghost" onClick={() => setAdding(null)}>취소</button><button type="button" className="gbx-btn primary" disabled={!adding.trim()} onClick={addById}>추가하고 열기</button></>}>
@@ -145,11 +182,11 @@ function CustomersPage() {
       </dl>
       <p className="gbx-help">기존 ID와 정보가 다르면 고객관리의 저장정보를 엑셀 값으로 수정해요. 과거 방송 주문은 바꾸지 않아요.</p>
     </Modal> : null}
-    {openId ? <CustomerPanel key={openId} customerId={openId} ids={ids} onNavigate={setOpenId} onClose={() => setOpenId(null)} /> : null}
+    {openId ? <CustomerPanel key={openId} customerId={openId} ids={ids} duplicates={duplicates} onNavigate={setOpenId} onClose={() => setOpenId(null)} /> : null}
   </>;
 }
 
-function CustomerPanel({ customerId, ids, onNavigate, onClose }: { customerId: string; ids: string[]; onNavigate: (id: string) => void; onClose: () => void }) {
+function CustomerPanel({ customerId, ids, duplicates, onNavigate, onClose }: { customerId: string; ids: string[]; duplicates: DuplicateGroup[]; onNavigate: (id: string) => void; onClose: () => void }) {
   const { state, commit } = useDashboard();
   const customer = state.customers.find((item) => item.id === customerId);
   const [frozenIds] = useState(ids);
@@ -179,6 +216,7 @@ function CustomerPanel({ customerId, ids, onNavigate, onClose }: { customerId: s
   const checks = [...(customer.checkHistory ?? [])].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   const history = customerOrderHistory(state, customer);
   const checkCount = customerCheckCount(customer);
+  const duplicateGroup = duplicates.find((group) => group.customers.some((item) => item.id === customer.id));
   const dirty = instagramId !== customer.instagramId || JSON.stringify(delivery) !== JSON.stringify(customer.delivery);
   const editCheck = (check?: CustomerCheck) => { setDeletingCheckId(null); setCheckDraft({ id: check?.id ?? null, date: check?.date ?? today(), note: check?.note ?? "" }); };
   function saveCheck() {
@@ -214,6 +252,19 @@ function CustomerPanel({ customerId, ids, onNavigate, onClose }: { customerId: s
           <div><small>누적 체크</small><strong className={checkCount ? "red" : ""}>{checkCount}회</strong></div>
           <p>{hasSavedDelivery(customer) ? `최근 주문 ${orderDate(lastOrderedAt)}` : "아이디만 저장된 고객이에요 · 주문서가 오면 배송정보가 채워져요"}</p>
         </section>
+
+        {duplicateGroup ? <section className="gbx-sec">
+          <div className="gbx-sec-head"><h3>같은 사람일 수 있어요</h3></div>
+          <DuplicateCard key={duplicateGroup.customers.map((item) => item.id).sort().join()} group={duplicateGroup} onMerged={onNavigate} />
+        </section> : null}
+
+        {customer.mergedCustomers?.length ? <section className="gbx-sec">
+          <div className="gbx-sec-head"><h3>합쳐진 아이디</h3><span className="gbx-help">이 아이디로 온 주문도 이 고객으로 묶여요</span></div>
+          <ul className="gbx-cu-merged">{customer.mergedCustomers.map((merged) => <li key={merged.id}>
+            <strong>{merged.instagramId}</strong>
+            <button type="button" className="gbx-link" onClick={() => commit((current) => splitCustomer(current, customer.id, merged.id), `${merged.instagramId}를 다시 별도 고객으로 분리했어요.`)}>분리</button>
+          </li>)}</ul>
+        </section> : null}
 
         <section className="gbx-sec">
           <div className="gbx-sec-head"><h3>배송 정보</h3>{!hasSavedDelivery(customer) ? <span className="gbx-help">비워 둬도 저장돼요</span> : null}</div>
@@ -260,7 +311,7 @@ function CustomerPanel({ customerId, ids, onNavigate, onClose }: { customerId: s
           <summary>주문 내역 {history.length}건<ChevronDown /></summary>
           {history.length ? <ul className="gbx-cu-history">{history.map((item) => <li key={item.id}>
             <div><b>{item.broadcastTitle}</b><StatusPill status={item.status} /></div>
-            <span>{orderDate(item.orderedAt)} · {item.total == null ? "—" : won(item.total)} · {item.quantity == null ? "—" : `${item.quantity}개`}</span>
+            <span>{customer.mergedCustomers?.length ? `@${item.instagramId} · ` : ""}{orderDate(item.orderedAt)} · {item.total == null ? "—" : won(item.total)} · {item.quantity == null ? "—" : `${item.quantity}개`}</span>
             {item.items.length ? <small>{item.items.join(" · ")}</small> : null}
           </li>)}</ul> : <p className="gbx-cu-empty">누적된 주문 내역이 없어요.</p>}
         </details>

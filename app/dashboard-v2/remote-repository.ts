@@ -82,8 +82,10 @@ function mergeCustomer(remote: Customer, local: Customer): Customer {
 
 function mergeCustomers(remote: Customer[], local: Customer[]) {
   const byInstagramId = new Map(remote.map((customer) => [canonicalInstagramId(customer.instagramId), customer]));
+  const mergedAway = new Set(remote.flatMap((customer) => (customer.mergedCustomers ?? []).map((merged) => canonicalInstagramId(merged.instagramId))));
   for (const customer of local) {
     const key = canonicalInstagramId(customer.instagramId);
+    if (mergedAway.has(key)) continue;
     const previous = byInstagramId.get(key);
     byInstagramId.set(key, previous ? mergeCustomer(previous, customer) : customer);
   }
