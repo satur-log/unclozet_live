@@ -646,3 +646,6 @@
 @keyframes gb-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes gb-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .gb-sheet, .gb-sheet-backdrop { animation: none; } }
+
+/* 서버가 만든 첫 화면은 기기 폭을 모른다. 휴대폰에서 옵션 패널이 잠깐 보이지 않게 CSS로 가린다. */
+@media (max-width: 899px) { .gb-pdp-inline-options { display: none; } }

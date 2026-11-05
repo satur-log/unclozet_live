@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { ChartNoAxesCombined, ShoppingBag, UsersRound } from "lucide-react";
 
 export type ShellSection = "broadcasts" | "customers" | "group-buys";
@@ -15,6 +16,12 @@ export function Shell({ children, section, basePath = "" }: { children: React.Re
   const groupBuysHref = `${basePath}/group-buys`;
   // 공구는 아직 시험 운영 중이라 메뉴에 beta를 붙인다.
   const beta = <em className="v2-beta">beta</em>;
+  // 공구 탭이 바로 뜨도록 다른 탭을 보는 동안 공구 데이터를 미리 받아 둔다.
+  useEffect(() => {
+    if (section === "group-buys") return;
+    const timer = window.setTimeout(() => { void import("../group-buy/store").then(({ preloadGroupBuyState }) => preloadGroupBuyState()); }, 800);
+    return () => window.clearTimeout(timer);
+  }, [section]);
   return <div className="v2-app">
     <aside className="v2-sidebar">
       <Link href={broadcastsHref} className="v2-brand"><span>UC</span><div><strong>언클로젯</strong></div></Link>

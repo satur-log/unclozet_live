@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ReceiptText } from "lucide-react";
 import { availability, groupBuyBySlug, type Availability } from "./model";
@@ -20,15 +20,17 @@ export function ProtoBar() {
 
 /** 미리보기(?preview=1)로 들어온 판매자는 같은 탭에서 상세·장바구니로 이동해도 미리보기 상태를 유지한다. */
 export function usePreview(slug: string) {
-  const fromUrl = useSearchParams().get("preview") === "1";
-  const [stored, setStored] = useState(false);
+  const [preview, setPreview] = useState(false);
+  // 주소는 화면이 뜬 뒤에 읽는다. useSearchParams를 쓰면 고객 화면이 HTML에 담기지 못한다.
   useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("preview") === "1";
+    setPreview(fromUrl);
     try {
       if (fromUrl) window.sessionStorage.setItem(`gb-preview:${slug}`, "1");
-      setStored(window.sessionStorage.getItem(`gb-preview:${slug}`) === "1");
+      setPreview(fromUrl || window.sessionStorage.getItem(`gb-preview:${slug}`) === "1");
     } catch { /* ignore */ }
-  }, [fromUrl, slug]);
-  return fromUrl || stored;
+  }, [slug]);
+  return preview;
 }
 
 export function useNow(intervalMs = 30_000) {

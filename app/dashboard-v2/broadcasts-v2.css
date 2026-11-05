@@ -125,7 +125,7 @@ body:has(.gbx-bc) .v2-toast > span { background: none; }
 .gbx-cu-check-form { margin-top: 10px; padding: 12px; background: var(--x-soft); }
 .gbx-cu-checks .gbx-cu-check-form { margin-top: 0; }
 .gbx-cu-more { margin-left: 6px; color: var(--x-muted); font-size: 12px; font-weight: 400; }
-.gbx-cu-dups { display: grid; gap: 12px; }
+.gbx-cu-dups { display: grid; gap: 12px; margin-top: 12px; }
 .gbx-cu-dup { padding: 14px 16px; border: 1px solid #e5e5e5; border-radius: 3px; background: #fff; }
 .gbx-panel .gbx-cu-dup { padding: 0; border: 0; }
 .gbx-cu-dup-reason { margin: 0 0 6px; color: #555; font-size: 12.5px; }

@@ -113,6 +113,13 @@ export async function submitAdminOrder(request: SubmitRequest): Promise<ServerSu
 }
 
 /** 예시 공구(마약 팬츠)를 주문 없이 넣는다. */
+/** 공구 탭을 누르기 전에 미리 받아 둔다. 실패해도 조용히 넘어가고, 탭을 열 때 다시 시도한다. */
+export async function preloadGroupBuyState() {
+  if (meta.status !== "idle") return;
+  await reloadGroupBuyState(true);
+  if ((meta as SyncMeta).status === "error") setMeta({ status: "idle", error: "" });
+}
+
 export async function insertExampleGroupBuy() {
   await queue;
   await api("/api/gb/admin/example", { method: "POST" });
@@ -146,6 +153,7 @@ const POLL_MS = 20_000;
 function watch() {
   // 다른 기기에서 들어온 고객 주문·관리자 변경을 주기적으로 받아온다. 저장 중일 때는 건너뛴다.
   const tick = () => { if (document.visibilityState === "visible" && pending === 0 && meta.status === "ready") void reloadGroupBuyState(true); };
+  tick(); // 미리 받아 둔 데이터가 오래됐을 수 있어 화면을 열면 바로 새로 받는다.
   const timer = window.setInterval(tick, POLL_MS);
   window.addEventListener("focus", tick);
   return () => { window.clearInterval(timer); window.removeEventListener("focus", tick); };

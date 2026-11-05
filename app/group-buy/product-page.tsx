@@ -222,7 +222,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
           </dl>
           {notices.length ? <ul className="gb-pdp-notices">{notices.map((line) => <li key={line}>{line}</li>)}</ul> : null}
 
-          {!canBuy ? <ClosedNotice groupBuy={gb} reason={open.reason} /> : mobile ? null : optionsPanel}
+          {!canBuy ? <ClosedNotice groupBuy={gb} reason={open.reason} /> : mobile ? null : <div className="gb-pdp-inline-options">{optionsPanel}</div>}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from "react";
 import type { SubmitRequest, SubmitResult } from "./model";
 import { api, ApiError } from "./store";
 import type { GbOrder, GroupBuyState } from "./types";
@@ -10,8 +10,15 @@ import type { GbOrder, GroupBuyState } from "./types";
 
 const groupBuyCache = new Map<string, GroupBuyState>();
 
-function useRemote(key: string, cache: Map<string, GroupBuyState> | null, load: () => Promise<GroupBuyState>) {
-  const [state, setState] = useState<GroupBuyState | null>(() => cache?.get(key) ?? null);
+// 서버가 HTML을 만들 때 넣어 준 공구 정보. 화면이 데이터를 기다리지 않고 바로 그려진다.
+const SeedContext = createContext<{ slug: string; state: GroupBuyState | null } | null>(null);
+
+export function PublicGroupBuySeed({ slug, state, children }: { slug: string; state: GroupBuyState | null; children: ReactNode }) {
+  return createElement(SeedContext.Provider, { value: { slug, state } }, children);
+}
+
+function useRemote(key: string, cache: Map<string, GroupBuyState> | null, load: () => Promise<GroupBuyState>, seed: GroupBuyState | null = null) {
+  const [state, setState] = useState<GroupBuyState | null>(() => cache?.get(key) ?? seed);
   useEffect(() => {
     let alive = true;
     const refresh = () => load().then((next) => { cache?.set(key, next); if (alive) setState(next); }).catch(() => { if (alive) setState((current) => current ?? { version: 1, groupBuys: [], orders: [], stockLogs: [], orderSeq: 0, lookupLocks: {} }); });
@@ -29,7 +36,8 @@ function useRemote(key: string, cache: Map<string, GroupBuyState> | null, load: 
 
 /** 공구 상세·주문서용. 받기 전에는 null, 없는 공구면 groupBuys가 빈 상태. */
 export function usePublicGroupBuy(slug: string) {
-  return useRemote(slug, groupBuyCache, () => api<GroupBuyState>(`/api/gb/public/${encodeURIComponent(slug)}`));
+  const seed = useContext(SeedContext);
+  return useRemote(slug, groupBuyCache, () => api<GroupBuyState>(`/api/gb/public/${encodeURIComponent(slug)}`), seed?.slug === slug ? seed.state : null);
 }
 
 /** 주문 전용 링크 */
