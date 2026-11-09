@@ -153,7 +153,7 @@ export function CheckoutPage({ slug }: { slug: string }) {
     });
   }
 
-  if (!priced.items.length) return <StoreFrame groupBuy={gb} preview={preview} open={open} back={orderFormPath(slug)} title="주문서"><div className="gb-view-page"><div className="gb-closed"><strong>주문할 상품이 없어요</strong><p>상품 상세에서 옵션을 고른 뒤 구매하기를 눌러주세요.</p><Link href={orderFormPath(slug)}>상품 보러 가기</Link></div></div></StoreFrame>;
+  if (!priced.items.length) return <StoreFrame groupBuy={gb} preview={preview} open={open} back={orderFormPath(slug)} title="주문서"><div className="gb-view-page"><div className="gb-notice"><strong>주문할 상품이 없어요</strong><p>상품 상세에서 옵션을 고른 뒤 구매하기를 눌러주세요.</p><Link href={orderFormPath(slug)}>상품 보러 가기</Link></div></div></StoreFrame>;
 
   return <StoreFrame groupBuy={gb} preview={preview} open={open} back={selection ? productPath(slug, selection.productId) : orderFormPath(slug)} title="주문서">
     <article className="gb-form-page gb-shop gb-checkout">
@@ -275,7 +275,7 @@ export function OrderViewPage({ token }: { token: string }) {
   const isNew = useSearchParams().get("new") === "1";
   if (!state) return <Loading />;
   const order = orderByToken(state, token);
-  if (!order) return <CustomerFrame><StoreHeader title="주문 상세" /><div className="gb-view-page gb-shop"><div className="gb-closed"><strong>주문을 찾을 수 없어요</strong><p>링크를 다시 확인하거나 휴대폰 번호로 조회해 주세요.</p><Link href={lookupPath()}>주문 조회</Link></div></div></CustomerFrame>;
+  if (!order) return <CustomerFrame><StoreHeader title="주문 상세" /><div className="gb-view-page gb-shop"><div className="gb-notice"><strong>주문을 찾을 수 없어요</strong><p>링크를 다시 확인하거나 휴대폰 번호로 조회해 주세요.</p><Link href={lookupPath()}>주문 조회</Link></div></div></CustomerFrame>;
   const groupBuy = state.groupBuys.find((item) => item.id === order.groupBuyId);
   const link = absoluteUrl(orderViewPath(order.lookupToken));
   return <CustomerFrame><StoreHeader groupBuy={groupBuy} title={isNew ? "주문 완료" : "주문 상세"} back={isNew ? undefined : lookupPath()} /><div className="gb-view-page gb-shop">

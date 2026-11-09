@@ -68,12 +68,12 @@ export function StoreFrame({ groupBuy, preview, open, children, back, title }: {
 }
 
 export function MissingStore() {
-  return <div className="gb-customer"><ProtoBar /><div className="gb-view-page"><div className="gb-closed"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
+  return <div className="gb-customer"><ProtoBar /><div className="gb-view-page"><div className="gb-notice"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
 }
 
 export function ClosedNotice({ groupBuy, reason }: { groupBuy: GroupBuy; reason: Availability["reason"] }) {
   const text = reason === "not-open" ? `${longDateTime(groupBuy.opensAt)}에 주문이 열려요.` : reason === "sold-out" ? "준비한 수량이 모두 판매되었어요." : reason === "draft" ? "아직 준비 중인 공구예요." : "주문이 마감되었어요.";
-  return <div className="gb-closed"><strong>{reason === "not-open" ? "오픈 예정" : reason === "draft" ? "준비 중" : reason === "sold-out" ? "전체 품절" : "주문 마감"}</strong><p>{text}</p><Link href={lookupPath()}>내 주문 조회하기</Link></div>;
+  return <div className="gb-notice"><strong>{reason === "not-open" ? "오픈 예정" : reason === "draft" ? "준비 중" : reason === "sold-out" ? "전체 품절" : "주문 마감"}</strong><p>{text}</p><Link href={lookupPath()}>내 주문 조회하기</Link></div>;
 }
 
 // ── 가격 표시 ────────────────────────────────────────────

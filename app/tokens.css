@@ -1,0 +1,143 @@
+/*
+  언클로젯 디자인 토큰. 색·글자 크기·간격·모서리·그림자·크기 값은 여기서만 정한다.
+  각 CSS는 값을 직접 적지 않고 var(--uc-이름)으로 가져다 쓴다.
+  규칙과 쓰임은 DESIGN.md에 있다.
+
+  반응형 기준은 CSS 미디어쿼리에 변수를 쓸 수 없어 여기 적어 두고 값으로 쓴다.
+  420 좁은 휴대폰 · 440 고객 폼 두 칸 · 640 매칭 행 쌓기 · 720 관리자 주요 전환
+  760 설정 목차 접기 · 899/900 고객 옵션 시트, 사이드바 전환 · 980 목록 숫자 내리기
+*/
+:root {
+  /* 글자 색 */
+  --uc-ink: #111111;
+  --uc-ink-hover: #333333;
+  --uc-text-2: #555555;
+  --uc-text-3: #666666;
+  --uc-muted: #6e6e6e;
+  --uc-faint: #bbbbbb;
+  --uc-disabled-text: #b8b8b8;
+  --uc-on-dark-muted: #bbbbbb;
+
+  /* 바탕 */
+  --uc-surface: #ffffff;
+  --uc-surface-glass: rgba(255, 255, 255, .96);
+  --uc-soft: #f6f6f6;
+  --uc-hover: #fafafa;
+  --uc-selected: #f2f2f2;
+  --uc-media: #ececec;
+  --uc-disabled-fill: #c9c9c9;
+  --uc-on-dark-tint: rgba(255, 255, 255, .17);
+  --uc-scrim: rgba(0, 0, 0, .18);
+  --uc-scrim-strong: rgba(0, 0, 0, .45);
+
+  /* 선 */
+  --uc-line: #e5e5e5;
+  --uc-line-row: #f0f0f0;
+  --uc-line-disabled: #ececec;
+  --uc-line-control: #d4d4d4;
+  --uc-line-chip: #d9d9d9;
+  --uc-line-arrow: #c4c4c4;
+  --uc-border-rule: 1.5px;
+
+  /* 상태 */
+  --uc-red: #e0202f;
+  --uc-red-ink: #b3131f;
+  --uc-red-soft: #fff1f1;
+  --uc-red-line: #f0c4c7;
+  --uc-orange: #b5561a;
+  --uc-orange-ink: #6b3a14;
+  --uc-orange-soft: #fff6f0;
+  --uc-orange-line: #f0c9a8;
+  --uc-preview-bg: #fff6d6;
+  --uc-preview-ink: #7a5a00;
+  --uc-preview-line: #f0dc94;
+
+  /* 글꼴 */
+  --uc-font-sans: "DM Sans", Arial, sans-serif;
+  --uc-font-display: "General Sans", "DM Sans", Arial, sans-serif;
+  --uc-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* 글자 크기 */
+  --uc-fs-10: 10px;
+  --uc-fs-11: 11px;
+  --uc-fs-12: 12px;
+  --uc-fs-13: 13px;
+  --uc-fs-14: 14px;
+  --uc-fs-15: 15px;
+  --uc-fs-16: 16px;
+  --uc-fs-18: 18px;
+  --uc-fs-20: 20px;
+  --uc-fs-22: 22px;
+  --uc-fs-24: 24px;
+  --uc-fs-28: 28px;
+  --uc-fs-64: 64px;
+
+  /* 간격 */
+  --uc-space-2: 2px;
+  --uc-space-4: 4px;
+  --uc-space-6: 6px;
+  --uc-space-8: 8px;
+  --uc-space-10: 10px;
+  --uc-space-12: 12px;
+  --uc-space-14: 14px;
+  --uc-space-16: 16px;
+  --uc-space-18: 18px;
+  --uc-space-20: 20px;
+  --uc-space-24: 24px;
+  --uc-space-28: 28px;
+  --uc-space-32: 32px;
+  --uc-space-36: 36px;
+  --uc-space-40: 40px;
+  --uc-space-48: 48px;
+  --uc-space-64: 64px;
+  --uc-space-72: 72px;
+  --uc-space-80: 80px;
+  --uc-space-96: 96px;
+
+  /* 모서리 */
+  --uc-radius-0: 0px;
+  --uc-radius-2: 2px;
+  --uc-radius-3: 3px;
+  --uc-radius-4: 4px;
+  --uc-radius-14: 14px;
+  --uc-radius-full: 50%;
+
+  /* 그림자와 표시선 */
+  --uc-shadow-raised: 0 8px 24px rgba(0, 0, 0, .1);
+  --uc-shadow-floating: 0 10px 30px rgba(0, 0, 0, .25);
+  --uc-shadow-panel: -12px 0 32px rgba(0, 0, 0, .12);
+  --uc-shadow-modal: 0 20px 50px rgba(0, 0, 0, .2);
+  --uc-shadow-sheet: 0 -8px 24px rgba(0, 0, 0, .12);
+  --uc-shadow-icon: 0 1px 2px rgba(0, 0, 0, .33);
+  --uc-focus-inset: inset 0 0 0 1px var(--uc-ink);
+  --uc-row-open: inset 2px 0 0 var(--uc-ink);
+  --uc-row-late: inset 2px 0 0 var(--uc-red);
+  --uc-row-warn: inset 2px 0 0 var(--uc-orange);
+  --uc-flow-active: inset 0 -2px 0 var(--uc-ink);
+
+  /* 컨트롤과 레이아웃 크기 */
+  --uc-h-btn: 38px;
+  --uc-h-btn-sm: 32px;
+  --uc-h-btn-xs: 28px;
+  --uc-h-btn-wide: 48px;
+  --uc-h-search: 40px;
+  --uc-h-table-head: 40px;
+  --uc-h-table-row: 64px;
+  --uc-h-tab: 46px;
+  --uc-w-sidebar: 252px;
+  --uc-w-content: 1180px;
+  --uc-w-pdp: 1080px;
+  --uc-w-checkout: 640px;
+  --uc-w-modal-wide: 940px;
+
+  /* 레이어 순서 */
+  --uc-z-sticky: 10;
+  --uc-z-header: 20;
+  --uc-z-sidebar: 30;
+  --uc-z-mobile-head: 35;
+  --uc-z-bulk: 40;
+  --uc-z-panel: 50;
+  --uc-z-modal: 60;
+  --uc-z-toast: 70;
+  --uc-z-notice: 100;
+}

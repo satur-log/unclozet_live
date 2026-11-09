@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import readXlsxFile from "read-excel-file/node";
 import { analyzeSettlement } from "../app/dashboard-v2/settlement";
@@ -555,4 +556,12 @@ test("큰 엑셀도 만든다 (바이트를 한 번에 펼치면 호출 스택�
   const bytes = createWorkbook([{ name: "주문", rows: [["주문", "주소", "전화", "품목"], ...rows] }]);
   const sheets = await readXlsxFile(Buffer.from(bytes));
   assert.equal(sheets[0].data.length, 3001);
+});
+
+test("CSS는 색과 글자 크기를 tokens.css에서만 가져온다", () => {
+  for (const file of ["app/globals.css", "app/group-buy/group-buy.css", "app/group-buy/admin-v2.css", "app/dashboard-v2/broadcasts-v2.css"]) {
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.deepEqual(css.match(/#[0-9a-fA-F]{3,8}\b/g), null, `${file}: 색은 --uc-* 토큰으로`);
+    assert.deepEqual(css.match(/font-size:\s*[\d.]+px/g), null, `${file}: 글자 크기는 --uc-fs-* 토큰으로`);
+  }
 });

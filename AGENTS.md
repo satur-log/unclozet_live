@@ -10,3 +10,4 @@
 - External APIs must not block core work. If postcode lookup fails or the API key is invalid, allow order saving with an empty postcode.
 - Treat memo sessions and standalone order sessions as different list item types. Keep them visually separated in the saved list.
 - Before deployment: run `npm run build`, check `git diff --check`, commit the intended files only, then push `main`.
+- Styling values live in `app/tokens.css`; use `var(--uc-*)` in CSS instead of raw colors or font sizes. Rules are in `DESIGN.md`.

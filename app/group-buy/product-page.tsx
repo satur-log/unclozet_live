@@ -126,7 +126,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
   if (!state) return <div className="gb-customer"><ProtoBar /><p className="gb-center-note">불러오는 중…</p></div>;
   if (!groupBuy) return <MissingStore />;
   const open = availability(groupBuy, now);
-  if (!product || (groupBuy.status === "draft" && !preview)) return <StoreFrame groupBuy={groupBuy} preview={preview} open={open} back={orderFormPath(slug)}><div className="gb-view-page"><div className="gb-closed"><strong>상품을 찾을 수 없어요</strong><Link href={orderFormPath(slug)}>공구 홈으로</Link></div></div></StoreFrame>;
+  if (!product || (groupBuy.status === "draft" && !preview)) return <StoreFrame groupBuy={groupBuy} preview={preview} open={open} back={orderFormPath(slug)}><div className="gb-view-page"><div className="gb-notice"><strong>상품을 찾을 수 없어요</strong><Link href={orderFormPath(slug)}>공구 홈으로</Link></div></div></StoreFrame>;
   const gb = groupBuy;
   const item = product;
   const canBuy = open.orderable || (preview && open.reason === "draft");

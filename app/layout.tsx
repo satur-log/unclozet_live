@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import "./tokens.css";
 import "./globals.css";
 import { DashboardRootProvider } from "./dashboard-v2/DashboardRootProvider";
 
