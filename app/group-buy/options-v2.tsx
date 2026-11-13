@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { GbOption, GbProduct, SizeChart, VariantAxis } from "./types";
+import { orderedAxisValues } from "./variant-order";
 
 // 공구 관리 v2 설정의 상품 옵션·실측 사이즈 편집.
 // 옵션은 "분류(종류·기장·사이즈·컬러…) → 값" 순서로 만들고, 분류 값의 모든 조합이 판매 조합이 된다.
@@ -162,11 +163,11 @@ export function OptionsEditor({ product, onChange, lockedIds }: { product: GbPro
           </div>
           <div className="gbs-axis-values">
             <div className="gbs-values">
-              {axis?.values.map((value) => { const locked = product.options.some((option) => option.attrs?.[axis.name] === value && ordered(option)); return <span key={value} className="gbs-value">
+              {axis ? orderedAxisValues(axis).map((value) => { const locked = product.options.some((option) => option.attrs?.[axis.name] === value && ordered(option)); return <span key={value} className="gbs-value">
                 <b>{value}</b>
                 <input value={axis.valueNotes?.[value] ?? ""} onChange={(e) => setNote(axis, value, e.target.value)} placeholder="설명" aria-label={`${value} 칩 설명`} title="칩에 괄호로 붙는 설명. 예: 55~66 → FREE(55~66)" />
                 <button type="button" aria-label={`${value} 빼기`} disabled={locked || (axis.values.length === 1 && hasOrders)} title={locked ? "주문이 있는 값은 뺄 수 없어요" : `${value} 빼기`} onClick={() => removeValue(axis, value)}><X /></button>
-              </span>; })}
+              </span>; }) : null}
               <span className="gbs-value-add"><input value={newValues[name] ?? ""} onChange={(e) => setNewValues({ ...newValues, [name]: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addValue(name, newValues[name] ?? ""); } }} placeholder={axis ? `${name} 값 추가` : `${name} 값 입력 후 Enter`} aria-label={`${name} 값 추가`} autoFocus={!axis} /><button type="button" onClick={() => addValue(name, newValues[name] ?? "")} aria-label="값 추가"><Plus /></button></span>
             </div>
             {valuePresets.length ? <div className="gbs-presets"><span>추천</span>{valuePresets.map((value) => <button key={value} type="button" onClick={() => addValue(name, value)}>+ {value}</button>)}</div> : null}
@@ -201,7 +202,7 @@ export function OptionsEditor({ product, onChange, lockedIds }: { product: GbPro
         </div>
         <div className="gbs-table-wrap"><table className="gbs-table">
           <thead><tr><th className="check">판매</th>{axes.map((axis) => <th key={axis.name}>{axis.name}</th>)}<th>가격</th><th>재고</th><th>부족 알림</th><th className="num">주문됨</th></tr></thead>
-          <tbody>{cartesian(axes).map((combo) => {
+          <tbody>{cartesian(axes.map((axis) => ({ ...axis, values: orderedAxisValues(axis) }))).map((combo) => {
             const option = optionFor(combo);
             const locked = option ? ordered(option) : false;
             return <tr key={comboName(axes, combo)} className={option ? "" : "off"}>

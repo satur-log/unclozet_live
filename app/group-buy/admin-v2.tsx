@@ -17,6 +17,7 @@ import { priceCart } from "./pricing";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
 import { insertExampleGroupBuy, onGroupBuySyncError, reloadGroupBuyState, unlockAdmin, updateGroupBuyState, useGroupBuyState, useGroupBuySync } from "./store";
 import type { GbOrder, GbProduct, GroupBuy, GroupBuyState } from "./types";
+import { compareOptionAttrs } from "./variant-order";
 import { absoluteUrl, AdminBaseContext, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, productPath, useAdminPath, ProductThumb, type Cart, won } from "./ui";
 import { axesFor } from "./variants";
 import "./group-buy.css";
@@ -535,13 +536,19 @@ function stockGrid(product: GbProduct) {
   if (axes.length < 2) return null;
   const rowAxes = product.sizeChart?.groupAxes.length ? product.sizeChart.groupAxes : axes.slice(0, Math.ceil(axes.length / 2));
   const colAxes = axes.filter((axis) => !rowAxes.includes(axis));
-  const key = (attrs: Record<string, string>, names: string[]) => names.map((name) => attrs[name]).join(" ");
-  const unique = (names: string[]) => [...new Set(product.options.map((option) => key(option.attrs ?? {}, names)))];
-  // 열 순서는 축에 적힌 값 순서를 따른다(FREE→L, 블랙→멜란지).
-  const order = (names: string[]) => (value: string) => value.split(" ").reduce((sum, part, i) => sum * 10 + (axesFor(product).find((axis) => axis.name === names[i])?.values.indexOf(part) ?? 0), 0);
-  const rows = unique(rowAxes).sort((a, b) => order(rowAxes)(a) - order(rowAxes)(b));
-  const cols = unique(colAxes).sort((a, b) => order(colAxes)(a) - order(colAxes)(b));
-  const cell = (row: string, col: string) => product.options.find((option) => key(option.attrs ?? {}, rowAxes) === row && key(option.attrs ?? {}, colAxes) === col) ?? null;
+  const axisByName = new Map(product.axes.map((axis) => [axis.name, axis]));
+  const groups = (names: string[]) => {
+    const values = new Map<string, { key: string; label: string; attrs: Record<string, string> }>();
+    for (const option of product.options) {
+      const attrs = Object.fromEntries(names.map((name) => [name, option.attrs?.[name] ?? ""]));
+      const key = JSON.stringify(names.map((name) => attrs[name]));
+      if (!values.has(key)) values.set(key, { key, label: names.map((name) => attrs[name]).join(" "), attrs });
+    }
+    return [...values.values()].sort((a, b) => compareOptionAttrs(names.map((name) => axisByName.get(name)!).filter(Boolean), a.attrs, b.attrs));
+  };
+  const rows = groups(rowAxes);
+  const cols = groups(colAxes);
+  const cell = (row: string, col: string) => product.options.find((option) => JSON.stringify(rowAxes.map((name) => option.attrs?.[name] ?? "")) === row && JSON.stringify(colAxes.map((name) => option.attrs?.[name] ?? "")) === col) ?? null;
   return { rowAxes, colAxes, rows, cols, cell };
 }
 
@@ -597,13 +604,6 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
   const logs = state.stockLogs.filter((log) => optionIds.has(log.optionId)).slice(0, 50);
   const orderNo = new Map(state.orders.map((order) => [order.id, order.orderNo]));
   const q = query.trim().toLowerCase();
-  const axisValueOrder: Record<string, string[]> = {
-    "종류": ["와이드", "슬림", "기모 와이드", "기모 일반"],
-    "기장": ["숏", "롱", "슈퍼롱"],
-    "사이즈": ["F", "L"],
-    "컬러": ["블랙", "그레이", "챠콜"],
-    "색상": ["블랙", "그레이", "챠콜"],
-  };
   const optionById = new Map(groupBuy.products.flatMap((product) => product.options.map((option) => [option.id, { product, option }] as const)));
   const rows = report
     .filter((row) => filter === "all" || (filter === "short" ? row.shortage > 0 : filter === "low" ? row.level === "low" : row.soldOut))
@@ -614,19 +614,7 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
       if (!aData || !bData) return a.optionName.localeCompare(b.optionName, "ko");
       const productOrder = groupBuy.products.indexOf(aData.product) - groupBuy.products.indexOf(bData.product);
       if (productOrder) return productOrder;
-      const axes = aData.product.axes;
-      for (const axis of axes) {
-        const aValue = aData.option.attrs?.[axis.name] ?? "";
-        const bValue = bData.option.attrs?.[axis.name] ?? "";
-        const order = axisValueOrder[axis.name] ?? axis.values;
-        const aIndex = order.indexOf(aValue);
-        const bIndex = order.indexOf(bValue);
-        const valueOrder = (aIndex < 0 ? order.length : aIndex) - (bIndex < 0 ? order.length : bIndex);
-        if (valueOrder) return valueOrder;
-        const fallback = aValue.localeCompare(bValue, "ko");
-        if (fallback) return fallback;
-      }
-      return a.optionName.localeCompare(b.optionName, "ko", { numeric: true });
+      return compareOptionAttrs(aData.product.axes, aData.option.attrs, bData.option.attrs) || a.optionName.localeCompare(b.optionName, "ko", { numeric: true });
     });
   const listed = rows;
   const reorderText = () => [`[${groupBuy.title}] 추가 발주`, ...short.map((row) => `${label(row)} ${row.shortage}개`), `합계 ${shortQty}개`].join("\n");
@@ -713,8 +701,8 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
             {groupBuy.products.length > 1 ? <h4>{product.name}</h4> : null}
             <p className="gbx-help">남은 수량 / 전체 · 빨간 −숫자는 부족분 · 칸을 누르면 조정</p>
             {grid ? <div className="gbx-matrix-wrap"><table className="gbx-matrix">
-              <thead><tr><th>{grid.rowAxes.join(" · ")} \ {grid.colAxes.join(" · ")}</th>{grid.cols.map((col) => <th key={col}>{col}</th>)}</tr></thead>
-              <tbody>{grid.rows.map((row) => <tr key={row}><th>{row}</th>{grid.cols.map((col) => { const option = grid.cell(row, col); const stock = option ? byId.get(option.id) : null; return <td key={col}>{stock ? <Cell row={stock} /> : <span className="gbx-cell none">—</span>}</td>; })}</tr>)}</tbody>
+              <thead><tr><th>{grid.rowAxes.join(" · ")} \ {grid.colAxes.join(" · ")}</th>{grid.cols.map((col) => <th key={col.key}>{col.label}</th>)}</tr></thead>
+              <tbody>{grid.rows.map((row) => <tr key={row.key}><th>{row.label}</th>{grid.cols.map((col) => { const option = grid.cell(row.key, col.key); const stock = option ? byId.get(option.id) : null; return <td key={col.key}>{stock ? <Cell row={stock} /> : <span className="gbx-cell none">—</span>}</td>; })}</tr>)}</tbody>
             </table></div> : <div className="gbx-cells">{product.options.map((option) => { const stock = byId.get(option.id); return stock ? <div key={option.id} className="gbx-cell-row"><span>{option.name}</span><Cell row={stock} /></div> : null; })}</div>}
           </div>;
         })}
