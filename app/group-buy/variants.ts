@@ -1,5 +1,6 @@
 import { isSoldOut } from "./pricing";
 import type { GbOption, GbProduct, SizeChart, VariantAxis } from "./types";
+import { orderedAxisValues } from "./variant-order";
 
 // 옵션 축(종류 → 기장 → 사이즈 → 컬러) 선택 규칙.
 // 존재하는 조합만 고를 수 있고, 앞에서 고른 값 때문에 선택지가 하나만 남으면 자동으로 고른다.
@@ -10,7 +11,7 @@ export type Selection = Record<string, string>;
 const SIMPLE_AXIS = "옵션";
 
 export function axesFor(product: GbProduct): VariantAxis[] {
-  return product.axes.length ? product.axes : [{ name: SIMPLE_AXIS, values: product.options.map((option) => option.name) }];
+  return product.axes.length ? product.axes.map((axis) => ({ ...axis, values: orderedAxisValues(axis) })) : [{ name: SIMPLE_AXIS, values: product.options.map((option) => option.name) }];
 }
 
 export function attrsOf(product: GbProduct, option: GbOption): Selection {
