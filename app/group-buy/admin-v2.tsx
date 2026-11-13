@@ -597,9 +597,37 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
   const logs = state.stockLogs.filter((log) => optionIds.has(log.optionId)).slice(0, 50);
   const orderNo = new Map(state.orders.map((order) => [order.id, order.orderNo]));
   const q = query.trim().toLowerCase();
+  const axisValueOrder: Record<string, string[]> = {
+    "종류": ["와이드", "슬림", "기모 와이드", "기모 일반"],
+    "기장": ["숏", "롱", "슈퍼롱"],
+    "사이즈": ["F", "L"],
+    "컬러": ["블랙", "그레이", "챠콜"],
+    "색상": ["블랙", "그레이", "챠콜"],
+  };
+  const optionById = new Map(groupBuy.products.flatMap((product) => product.options.map((option) => [option.id, { product, option }] as const)));
   const rows = report
     .filter((row) => filter === "all" || (filter === "short" ? row.shortage > 0 : filter === "low" ? row.level === "low" : row.soldOut))
-    .filter((row) => !q || label(row).toLowerCase().includes(q));
+    .filter((row) => !q || label(row).toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aData = optionById.get(a.optionId);
+      const bData = optionById.get(b.optionId);
+      if (!aData || !bData) return a.optionName.localeCompare(b.optionName, "ko");
+      const productOrder = groupBuy.products.indexOf(aData.product) - groupBuy.products.indexOf(bData.product);
+      if (productOrder) return productOrder;
+      const axes = aData.product.axes;
+      for (const axis of axes) {
+        const aValue = aData.option.attrs?.[axis.name] ?? "";
+        const bValue = bData.option.attrs?.[axis.name] ?? "";
+        const order = axisValueOrder[axis.name] ?? axis.values;
+        const aIndex = order.indexOf(aValue);
+        const bIndex = order.indexOf(bValue);
+        const valueOrder = (aIndex < 0 ? order.length : aIndex) - (bIndex < 0 ? order.length : bIndex);
+        if (valueOrder) return valueOrder;
+        const fallback = aValue.localeCompare(bValue, "ko");
+        if (fallback) return fallback;
+      }
+      return a.optionName.localeCompare(b.optionName, "ko", { numeric: true });
+    });
   const listed = rows;
   const reorderText = () => [`[${groupBuy.title}] 추가 발주`, ...short.map((row) => `${label(row)} ${row.shortage}개`), `합계 ${shortQty}개`].join("\n");
 
