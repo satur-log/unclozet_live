@@ -286,6 +286,11 @@ export function SettingsV2({ state, groupBuy }: { state: GroupBuyState; groupBuy
         </div>
       </section>
 
+      {orderCount ? <section className="gbs-section" aria-label="주문 초기화">
+        <header><span>!</span><div><h2>주문 초기화</h2><p>기존 주문과 재고 기록을 삭제하고 옵션을 새로 구성할 때 사용해요.</p></div></header>
+        <OrderReset state={state} groupBuy={groupBuy} orderCount={orderCount} />
+      </section> : null}
+
       <DeleteGroupBuy state={state} groupBuy={groupBuy} />
     </div>
 
@@ -295,4 +300,27 @@ export function SettingsV2({ state, groupBuy }: { state: GroupBuyState; groupBuy
       <button type="submit" className="gbx-btn primary" disabled={!dirty}>저장</button>
     </div>
   </form>;
+}
+
+function OrderReset({ state, groupBuy, orderCount }: { state: GroupBuyState; groupBuy: GroupBuy; orderCount: number }) {
+  const run = useRun();
+  const [confirming, setConfirming] = useState(false);
+  const optionIds = new Set(groupBuy.products.flatMap((item) => item.options.map((option) => option.id)));
+  const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id);
+  if (!confirming) return <button type="button" className="gbx-btn danger" onClick={() => setConfirming(true)}>기존 주문 {orderCount}건 초기화</button>;
+  return <div className="gbs-danger">
+    <p><b>기존 주문을 영구 삭제할까요?</b> 주문자 정보 {orderCount}건과 해당 주문의 재고 기록이 모두 삭제되며 되돌릴 수 없어요.</p>
+    <div>
+      <button type="button" className="gbx-btn ghost sm" onClick={() => setConfirming(false)}>취소</button>
+      <button type="button" className="gbx-btn danger sm" onClick={() => {
+        const phones = new Set(orders.map((order) => order.phone));
+        if (run((current) => ({
+          ...current,
+          orders: current.orders.filter((order) => order.groupBuyId !== groupBuy.id),
+          stockLogs: current.stockLogs.filter((log) => !optionIds.has(log.optionId)),
+          lookupLocks: Object.fromEntries(Object.entries(current.lookupLocks).filter(([phone]) => !phones.has(phone))),
+        }), "기존 주문과 재고 기록을 초기화했어요.")) setConfirming(false);
+      }}>주문 영구 삭제</button>
+    </div>
+  </div>;
 }
