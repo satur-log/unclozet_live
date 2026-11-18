@@ -58,17 +58,17 @@ export function StoreHeader({ groupBuy, back, title, lookupLink = true }: { grou
   </header>;
 }
 
-export function StoreFrame({ groupBuy, preview, open, children, back, title }: { groupBuy: GroupBuy; preview: boolean; open: Availability; children: React.ReactNode; back?: string; title?: string }) {
+export function StoreFrame({ groupBuy, preview, open, children, back, title, showProtoBar = true }: { groupBuy: GroupBuy; preview: boolean; open: Availability; children: React.ReactNode; back?: string; title?: string; showProtoBar?: boolean }) {
   return <div className="gb-customer">
-    <ProtoBar />
+    {showProtoBar ? <ProtoBar /> : null}
     {preview ? <div className="gb-preview-bar">관리자 미리보기 · {open.orderable ? "주문하면 실제로 저장됩니다" : "지금은 주문을 받을 수 없는 상태입니다"}</div> : null}
     <StoreHeader groupBuy={groupBuy} back={back} title={title} />
     {children}
   </div>;
 }
 
-export function MissingStore() {
-  return <div className="gb-customer"><ProtoBar /><div className="gb-view-page"><div className="gb-notice"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
+export function MissingStore({ showProtoBar = true }: { showProtoBar?: boolean }) {
+  return <div className="gb-customer">{showProtoBar ? <ProtoBar /> : null}<div className="gb-view-page"><div className="gb-notice"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
 }
 
 export function ClosedNotice({ groupBuy, reason }: { groupBuy: GroupBuy; reason: Availability["reason"] }) {

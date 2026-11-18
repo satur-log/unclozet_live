@@ -1,7 +1,7 @@
 import type { GbOption, VariantAxis } from "./types";
 
 const preferredValues: Record<string, string[]> = {
-  "종류": ["와이드", "슬림", "기모 와이드", "기모 일반"],
+  "종류": ["슬림", "와이드", "기모 일반", "기모슬림", "기모 슬림", "기모와이드", "기모 와이드"],
   "기장": ["숏", "롱", "슈퍼롱"],
   "사이즈": ["F", "L"],
   "컬러": ["블랙", "그레이", "챠콜"],
