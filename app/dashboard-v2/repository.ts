@@ -4,6 +4,39 @@ import { createMockState } from "./mock-data";
 export const STORAGE_KEY = "unclozet-dashboard-v2-mock-v2";
 export const LOCAL_TEST_STORAGE_KEY = "unclozet-dashboard-v2-local-test-v1";
 type StoragePort = Pick<Storage, "getItem" | "setItem">;
+
+export type DashboardStorageFailureKind = "quota" | "unavailable";
+export class DashboardStorageError extends Error {
+  constructor(
+    public kind: DashboardStorageFailureKind,
+    public operation: "read" | "write",
+    public key: string,
+    public payloadBytes?: number,
+    cause?: unknown,
+  ) {
+    super(kind === "quota" ? "브라우저 저장 공간 한도를 넘었습니다." : "브라우저 저장 공간에 접근할 수 없습니다.");
+    this.name = "DashboardStorageError";
+    if (cause !== undefined) Object.defineProperty(this, "cause", { value: cause });
+  }
+}
+
+export function isDashboardStorageError(error: unknown): error is DashboardStorageError {
+  return error instanceof DashboardStorageError;
+}
+
+function isQuotaExceeded(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { name?: unknown; message?: unknown; code?: unknown };
+  return value.name === "QuotaExceededError"
+    || value.name === "NS_ERROR_DOM_QUOTA_REACHED"
+    || value.code === 22
+    || value.code === 1014
+    || (typeof value.message === "string" && /quota.{0,20}(exceed|full)|exceed.{0,20}quota/i.test(value.message));
+}
+
+export function dashboardStorageFailure(error: unknown, operation: "read" | "write", key: string, payloadBytes?: number) {
+  return new DashboardStorageError(isQuotaExceeded(error) ? "quota" : "unavailable", operation, key, payloadBytes, error);
+}
 const record = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === "object" && !Array.isArray(v));
 const strings = (v: unknown, keys: string[]) => record(v) && keys.every((k) => typeof v[k] === "string");
 const delivery = (v: unknown): v is Delivery => strings(v, ["name", "address", "phone"]);
@@ -26,7 +59,9 @@ export function isDashboardState(value: unknown): value is DashboardState {
 }
 
 export function loadMockState(storage: StoragePort, key = STORAGE_KEY): DashboardState {
-  const raw = storage.getItem(key);
+  let raw: string | null;
+  try { raw = storage.getItem(key); }
+  catch (error) { throw dashboardStorageFailure(error, "read", key); }
   if (!raw) return createMockState();
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error("V2 저장 데이터가 손상되었습니다. 데모 초기화로 복구할 수 있습니다."); }
@@ -36,7 +71,10 @@ export function loadMockState(storage: StoragePort, key = STORAGE_KEY): Dashboar
 
 export function saveMockState(storage: StoragePort, state: DashboardState, key = STORAGE_KEY) {
   if (!isDashboardState(state)) throw new Error("저장 데이터 검증에 실패했습니다.");
-  storage.setItem(key, JSON.stringify(state));
+  const serialized = JSON.stringify(state);
+  const payloadBytes = new TextEncoder().encode(serialized).byteLength;
+  try { storage.setItem(key, serialized); }
+  catch (error) { throw dashboardStorageFailure(error, "write", key, payloadBytes); }
 }
 
 function withoutUpdatedAt<T extends { updatedAt: string }>(record: T) {

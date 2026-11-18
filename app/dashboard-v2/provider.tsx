@@ -7,6 +7,8 @@ import {
   clearRemoteSavePending,
   fetchRemoteDashboardState,
   hasRemoteDashboardConfig,
+  REMOTE_MIGRATION_KEY,
+  REMOTE_PENDING_KEY,
   markRemoteMigrationCompleted,
   markRemoteSavePending,
   mergeDashboardStates,
@@ -14,7 +16,7 @@ import {
   remoteSavePending,
   saveRemoteDashboardState,
 } from "./remote-repository";
-import { hasMeaningfulDashboardChange, LOCAL_TEST_STORAGE_KEY, STORAGE_KEY, loadMockState, saveMockState } from "./repository";
+import { hasMeaningfulDashboardChange, isDashboardState, DashboardStorageError, dashboardStorageFailure, LOCAL_TEST_STORAGE_KEY, STORAGE_KEY, saveMockState } from "./repository";
 import type { DashboardState } from "./types";
 
 export type SyncStatus = "loading" | "saving" | "synced" | "error" | "local";
@@ -25,11 +27,42 @@ type Context = {
   localOnly: boolean;
   commit: (change: (state: DashboardState) => DashboardState, message?: string) => boolean;
   notify: (message: string, error?: boolean) => void;
-  reset: () => void;
 };
 const DashboardContext = createContext<Context | null>(null);
 
 const SAVE_DELAY_MS = 700;
+
+function storageMessage(error: unknown) {
+  if (error instanceof DashboardStorageError && error.kind === "quota") {
+    const size = error.payloadBytes == null ? "" : ` 저장하려던 데이터는 약 ${Math.ceil(error.payloadBytes / 1024)}KB입니다.`;
+    return `브라우저 저장 공간이 부족해 오프라인 복사본을 저장하지 못했습니다.${size} Supabase 데이터는 계속 사용합니다.`;
+  }
+  return "브라우저 저장 공간에 접근할 수 없어 오프라인 복사본을 갱신하지 못했습니다. Supabase 데이터는 계속 사용합니다.";
+}
+
+function readStoredState(storage: Storage, key: string) {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return { state: null, exists: false, error: null as unknown };
+    let value: unknown;
+    try { value = JSON.parse(raw); }
+    catch { return { state: null, exists: true, error: new Error("브라우저에 저장된 데이터 형식이 올바르지 않습니다.") }; }
+    if (!isDashboardState(value)) return { state: null, exists: true, error: new Error("브라우저에 저장된 데이터 형식이 올바르지 않습니다.") };
+    return { state: value, exists: true, error: null as unknown };
+  } catch (error) {
+    return { state: null, exists: false, error: dashboardStorageFailure(error, "read", key) };
+  }
+}
+
+function readFlag(read: () => boolean, storageKey: string, onError: (error: unknown) => void) {
+  try { return read(); }
+  catch (error) { onError(dashboardStorageFailure(error, "read", storageKey)); return false; }
+}
+
+function writeFlag(write: () => void, storageKey: string, onError: (error: unknown) => void) {
+  try { write(); }
+  catch (error) { onError(dashboardStorageFailure(error, "write", storageKey)); }
+}
 
 export function DashboardProvider({ children, mode = "shared" }: { children: React.ReactNode; mode?: "shared" | "local-test" }) {
   const localOnly = mode === "local-test";
@@ -38,6 +71,7 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
   const stateRef = useRef<DashboardState | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
   const [loadError, setLoadError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
   const [notice, setNotice] = useState<{ message: string; error: boolean } | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +98,7 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
         .then(() => saveRemoteDashboardState(next))
         .then(() => {
           if (generation === saveGeneration.current) {
-            clearRemoteSavePending(window.localStorage);
+            writeFlag(() => clearRemoteSavePending(window.localStorage), REMOTE_PENDING_KEY, (error) => notify(storageMessage(error), false));
             if (mounted.current) setSyncStatus("synced");
           }
         })
@@ -82,88 +116,124 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
     let cancelled = false;
 
     async function initialize() {
-      try {
-        let local = loadMockState(window.localStorage, storageKey);
-        if (localOnly) {
-          if (cancelled) return;
-          stateRef.current = local;
-          setState(local);
-          readyRef.current = true;
-          setSyncStatus("local");
+      setLoadError("");
+      const localResult = localOnly
+        ? readStoredState(window.localStorage, storageKey!)
+        : readStoredState(window.localStorage, STORAGE_KEY);
+      if (localOnly) {
+        if (localResult.error) {
+          setLoadError(storageMessage(localResult.error));
+          setSyncStatus("error");
           return;
         }
-        const remoteEnabled = hasRemoteDashboardConfig();
-
-        if (remoteEnabled && window.localStorage.getItem(storageKey ?? STORAGE_KEY)) {
-          // A returning browser can show its last saved view immediately.
-          // Interactions stay locked until the shared state has been checked.
-          stateRef.current = local;
-          setState(local);
-        }
-
-        if (!remoteEnabled) {
-          if (!legacyImportCompleted(window.localStorage)) {
-            const { memos, rounds } = await fetchLegacyData();
-            const result = mergeLegacyData(local, memos, rounds);
-            local = result.state;
-            saveMockState(window.localStorage, local, storageKey);
-            markLegacyImportCompleted(window.localStorage);
-          }
-          if (cancelled) return;
-          stateRef.current = local;
-          setState(local);
-          readyRef.current = true;
-          setSyncStatus("local");
-          return;
-        }
-
-        const remote = await fetchRemoteDashboardState();
+        const local = localResult.state ?? createMockState();
         if (cancelled) return;
-        let next = remote ?? local;
-        let shouldSaveRemote = !remote;
+        stateRef.current = local;
+        setState(local);
+        readyRef.current = true;
+        setSyncStatus("local");
+        return;
+      }
 
-        if (remote && !remoteMigrationCompleted(window.localStorage)) {
-          next = mergeDashboardStates(remote, local);
-          shouldSaveRemote = true;
-        } else if (remote && remoteSavePending(window.localStorage)) {
-          next = local;
-          shouldSaveRemote = true;
+      const remoteEnabled = hasRemoteDashboardConfig();
+      if (!remoteEnabled) {
+        if (localResult.error) {
+          setLoadError(storageMessage(localResult.error));
+          setSyncStatus("error");
+          return;
         }
+        const local = localResult.state ?? createMockState();
+        if (cancelled) return;
+        stateRef.current = local;
+        setState(local);
+        readyRef.current = true;
+        setSyncStatus("local");
+        return;
+      }
 
-        if (!legacyImportCompleted(window.localStorage)) {
+      let remote: DashboardState | null;
+      try {
+        remote = await fetchRemoteDashboardState();
+      } catch (error) {
+        if (cancelled) return;
+        if (localResult.state) {
+          stateRef.current = localResult.state;
+          setState(localResult.state);
+        }
+        readyRef.current = false;
+        setLoadError(error instanceof Error ? error.message : "Supabase 공유 데이터를 불러오지 못했습니다.");
+        setSyncStatus("error");
+        return;
+      }
+      if (cancelled) return;
+
+      // A successful empty response is different from a failed query. Never upload
+      // an empty/mock or stale browser cache just because the workspace row is absent.
+      if (!remote) {
+        if (localResult.state) {
+          stateRef.current = localResult.state;
+          setState(localResult.state);
+        }
+        readyRef.current = false;
+        setLoadError("Supabase 공유 작업공간을 찾지 못했습니다. 브라우저 복사본은 보존했으며 저장하지 않았습니다.");
+        setSyncStatus("error");
+        return;
+      }
+
+      let next = remote;
+      let shouldSaveRemote = false;
+      let storageFlagsReadable = true;
+      const onFlagError = (error: unknown) => { storageFlagsReadable = false; notify(storageMessage(error), false); };
+      const migrationRead = readFlag(() => remoteMigrationCompleted(window.localStorage), REMOTE_MIGRATION_KEY, onFlagError);
+      const pendingRead = readFlag(() => remoteSavePending(window.localStorage), REMOTE_PENDING_KEY, onFlagError);
+      if (localResult.error) notify(storageMessage(localResult.error), false);
+
+      if (storageFlagsReadable && !migrationRead && localResult.state) {
+        next = mergeDashboardStates(remote, localResult.state);
+        shouldSaveRemote = true;
+      } else if (storageFlagsReadable && pendingRead && localResult.state) {
+        next = localResult.state;
+        shouldSaveRemote = true;
+      }
+
+      const legacyRead = readFlag(() => legacyImportCompleted(window.localStorage), "unclozet-dashboard-v2-legacy-import-v1", onFlagError);
+      if (storageFlagsReadable && !legacyRead) {
+        try {
           const { memos, rounds } = await fetchLegacyData();
           if (cancelled) return;
           const result = mergeLegacyData(next, memos, rounds);
           next = result.state;
-          markLegacyImportCompleted(window.localStorage);
           shouldSaveRemote = shouldSaveRemote || result.importedBroadcasts > 0;
-        }
-
-        if (shouldSaveRemote) {
-          if (cancelled) return;
-          await saveRemoteDashboardState(next);
-          clearRemoteSavePending(window.localStorage);
-        }
-        if (cancelled) return;
-        saveMockState(window.localStorage, next, storageKey);
-        markRemoteMigrationCompleted(window.localStorage);
-        stateRef.current = next;
-        setState(next);
-        readyRef.current = true;
-        setSyncStatus("synced");
-      } catch (error) {
-        if (cancelled) return;
-        try {
-          const fallback = loadMockState(window.localStorage, storageKey);
-          stateRef.current = fallback;
-          setState(fallback);
-          readyRef.current = true;
-          setSyncStatus("error");
-          notify(error instanceof Error ? error.message : "공유 데이터를 불러오지 못했습니다.", true);
-        } catch (fallbackError) {
-          setLoadError(fallbackError instanceof Error ? fallbackError.message : "브라우저 저장소를 읽을 수 없습니다.");
+          writeFlag(() => markLegacyImportCompleted(window.localStorage), "unclozet-dashboard-v2-legacy-import-v1", (error) => notify(storageMessage(error), false));
+        } catch (error) {
+          // The V2 Supabase read succeeded, so a failed optional legacy read must not
+          // replace it with a local/mock state or block it from being displayed.
+          notify(error instanceof Error ? `기존 데이터 추가 조회를 건너뛰었습니다: ${error.message}` : "기존 데이터 추가 조회를 건너뛰었습니다.", false);
         }
       }
+
+      if (shouldSaveRemote) {
+        try {
+          await saveRemoteDashboardState(next);
+          writeFlag(() => clearRemoteSavePending(window.localStorage), REMOTE_PENDING_KEY, (error) => notify(storageMessage(error), false));
+        } catch (error) {
+          if (cancelled) return;
+          setLoadError(error instanceof Error ? error.message : "Supabase에 기존 변경 내용을 동기화하지 못했습니다.");
+          setSyncStatus("error");
+          stateRef.current = next;
+          setState(next);
+          return;
+        }
+      }
+      if (cancelled) return;
+      try { saveMockState(window.localStorage, next, STORAGE_KEY); }
+      catch (error) { notify(storageMessage(error), false); }
+      writeFlag(() => markRemoteMigrationCompleted(window.localStorage), REMOTE_MIGRATION_KEY, (error) => notify(storageMessage(error), false));
+      stateRef.current = next;
+      setState(next);
+      readyRef.current = true;
+      setSyncStatus("synced");
+      if (localResult.error) notify(storageMessage(localResult.error), false);
     }
 
     void initialize();
@@ -173,7 +243,7 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [localOnly, storageKey]);
+  }, [localOnly, retryCount, storageKey]);
 
   const commit: Context["commit"] = (change, message) => {
     try {
@@ -181,8 +251,15 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
       const previous = stateRef.current;
       const next = change(previous);
       if (!hasMeaningfulDashboardChange(previous, next)) return true;
-      saveMockState(window.localStorage, next, storageKey);
-      if (!localOnly && hasRemoteDashboardConfig()) markRemoteSavePending(window.localStorage);
+      const remoteEnabled = !localOnly && hasRemoteDashboardConfig();
+      let cacheSaved = true;
+      try { saveMockState(window.localStorage, next, storageKey); }
+      catch (error) {
+        cacheSaved = false;
+        if (!remoteEnabled) throw error;
+        notify(storageMessage(error), false);
+      }
+      if (remoteEnabled && cacheSaved) writeFlag(() => markRemoteSavePending(window.localStorage), REMOTE_PENDING_KEY, (error) => notify(storageMessage(error), false));
       stateRef.current = next;
       setState(next);
       queueRemoteSave(next);
@@ -194,21 +271,9 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
     }
   };
 
-  function reset() {
-    try {
-      const next = createMockState();
-      saveMockState(window.localStorage, next, storageKey);
-      stateRef.current = next;
-      setState(next);
-      setLoadError("");
-      queueRemoteSave(next);
-      notify("V2 데이터가 초기화되었습니다.");
-    } catch { notify("브라우저 저장소에 접근할 수 없습니다.", true); }
-  }
-
   return <>
-    {loadError ? <main className="v2-recovery"><h1>V2 데이터를 불러오지 못했어요</h1><p>{loadError}</p><button onClick={reset}>V2 데이터 초기화</button><small>V1 저장 데이터는 변경하지 않습니다.</small></main>
-      : state ? <DashboardContext.Provider value={{ state, syncStatus, localOnly, commit, notify, reset }}><div inert={syncStatus === "loading"}>{children}</div>{syncStatus === "loading" ? <div className="v2-refresh-notice" role="status">최신 데이터를 확인하는 중…</div> : null}</DashboardContext.Provider>
+    {loadError ? <main className="v2-recovery"><h1>V2 데이터를 불러오지 못했어요</h1><p>{loadError}</p><button onClick={() => { setLoadError(""); setRetryCount((count) => count + 1); }}>다시 불러오기</button><small>저장된 Supabase 데이터와 브라우저 복사본은 변경하지 않았습니다.</small></main>
+      : state ? <DashboardContext.Provider value={{ state, syncStatus, localOnly, commit, notify }}><div inert={syncStatus === "loading"}>{children}</div>{syncStatus === "loading" ? <div className="v2-refresh-notice" role="status">최신 데이터를 확인하는 중…</div> : null}</DashboardContext.Provider>
       : <div className="v2-loading" role="status">공유 작업 공간을 불러오고 있어요…</div>}
     {notice ? <div role={notice.error ? "alert" : "status"} className={`v2-toast ${notice.error ? "error" : ""}`}><span>{notice.error ? "!" : "✓"}</span>{notice.message}<button onClick={() => setNotice(null)} aria-label="알림 닫기">×</button></div> : null}
   </>;
