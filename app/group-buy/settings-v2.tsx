@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { OptionsEditor, SizeChartEditor } from "./options-v2";
 import { uploadProductImage } from "./product-editor";
 import type { DetailBlock, GbProduct, GroupBuy, GroupBuyState } from "./types";
-import { absoluteUrl, orderFormPath, useAdminPath, won } from "./ui";
+import { orderLinkUrl, useAdminPath, won } from "./ui";
 
 // 공구 관리 v2 설정. 고객이 보는 순서대로 묶었다:
 // 기본 정보(상세 상단) → 상품 옵션 → 상세페이지(본문·배송 안내) → 주문 안내(주문서·완료 화면·입금 계좌).
@@ -224,7 +224,7 @@ export function SettingsV2({ state, groupBuy }: { state: GroupBuyState; groupBuy
         <Field label="한 줄 소개" hint="제목 아래 회색 글씨" wide><input value={product.summary} onChange={(e) => setProduct({ summary: e.target.value })} placeholder="예: 허리 밴딩 · 신축성 좋은 데일리 팬츠" /></Field>
         <div className="gbs-row">
           <Field label="주소 슬러그" hint="영문 소문자·숫자·하이픈">
-            <span className="gbs-slug"><em>…/gb/</em><input value={draft.slug} onChange={(e) => set("slug", e.target.value.toLowerCase())} /><button type="button" className="gbx-icon-btn" title="주문서 링크 복사" aria-label="주문서 링크 복사" onClick={() => copy(absoluteUrl(orderFormPath(draft.slug)), "주문서 링크")}><Copy /></button></span>
+            <span className="gbs-slug"><em>…/gb/</em><input value={draft.slug} onChange={(e) => set("slug", e.target.value.toLowerCase())} /><button type="button" className="gbx-icon-btn" title="주문서 링크 복사" aria-label="주문서 링크 복사" onClick={() => copy(orderLinkUrl(draft.slug), "주문서 링크")}><Copy /></button></span>
           </Field>
           <Field label="상태">
             <span className="gbs-segment" role="radiogroup" aria-label="상태">{([["draft", "준비", "비공개"], ["open", "진행", "주문 받기"], ["closed", "마감", "주문 막기"]] as const).map(([value, label, sub]) => <button key={value} type="button" role="radio" aria-checked={draft.status === value} className={draft.status === value ? "active" : ""} onClick={() => set("status", value)}>{label}<small>{sub}</small></button>)}</span>

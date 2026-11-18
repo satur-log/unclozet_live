@@ -22,6 +22,12 @@ export const checkoutPath = (slug: string) => `${TEST_BASE}/gb/${slug}/checkout`
 export const lookupPath = () => `${TEST_BASE}/gb/lookup`;
 export const orderViewPath = (token: string) => `${TEST_BASE}/gb/order/${token}`;
 export const absoluteUrl = (path: string) => typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+/** Public share URL for the pants group buy; other group buys keep their existing dashboard URL. */
+export const orderLinkUrl = (slug: string) => slug === "pants" ? "https://gb.uncloset.co.kr/pants" : absoluteUrl(orderFormPath(slug));
+/** Customer screen button opens the public pants URL without an admin preview flag. */
+export const customerScreenUrl = (slug: string, productId?: string) => slug === "pants"
+  ? "https://gb.uncloset.co.kr/pants"
+  : absoluteUrl(`${productId ? productPath(slug, productId) : orderFormPath(slug)}?preview=1`);
 
 export const won = (value: number) => `${value.toLocaleString("ko-KR")}원`;
 // 공구 시각은 항상 한국 시간으로 보여준다. 서버(UTC)가 만든 HTML과 브라우저 화면도 같아진다.

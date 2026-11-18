@@ -18,7 +18,7 @@ import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
 import { insertExampleGroupBuy, onGroupBuySyncError, reloadGroupBuyState, unlockAdmin, updateGroupBuyState, useGroupBuyState, useGroupBuySync } from "./store";
 import type { GbOrder, GbProduct, GroupBuy, GroupBuyState } from "./types";
 import { compareOptionAttrs } from "./variant-order";
-import { absoluteUrl, AdminBaseContext, CartPicker, cartLines, dateTime, downloadBytes, longDateTime, lookupPath, orderFormPath, orderViewPath, productPath, useAdminPath, ProductThumb, type Cart, won } from "./ui";
+import { absoluteUrl, AdminBaseContext, CartPicker, cartLines, customerScreenUrl, dateTime, downloadBytes, longDateTime, lookupPath, orderLinkUrl, orderViewPath, useAdminPath, ProductThumb, type Cart, won } from "./ui";
 import { axesFor } from "./variants";
 import "./group-buy.css";
 import "./admin-v2.css";
@@ -120,7 +120,7 @@ function ListPage({ state }: { state: GroupBuyState }) {
           <ChevronRight className="gbx-list-arrow" />
         </Link>
         <div className="gbx-list-actions">
-          <button type="button" className="gbx-icon-btn" title="주문서 링크 복사" aria-label={`${groupBuy.title} 주문서 링크 복사`} onClick={() => copy(absoluteUrl(orderFormPath(groupBuy.slug)), "주문서 링크")}><Link2 /></button>
+          <button type="button" className="gbx-icon-btn" title="주문서 링크 복사" aria-label={`${groupBuy.title} 주문서 링크 복사`} onClick={() => copy(orderLinkUrl(groupBuy.slug), "주문서 링크")}><Link2 /></button>
           <button type="button" className="gbx-icon-btn" title="상품·옵션 그대로 복제" aria-label={`${groupBuy.title} 복제`} onClick={() => duplicate(groupBuy.id)}><CopyPlus /></button>
         </div>
       </li>;
@@ -154,8 +154,8 @@ function DetailPage({ state, groupBuyId, initialTab }: { state: GroupBuyState; g
         <p className="gbx-meta">{longDateTime(groupBuy.opensAt)} – {longDateTime(groupBuy.closesAt)} · <b>{dday(groupBuy, now)}</b> · 주문 {live.length}건 · 매출 <b className="red">{won(live.reduce((sum, order) => sum + order.total, 0))}</b></p>
       </div>
       <div className="gbx-head-actions">
-        <button type="button" className="gbx-btn" onClick={() => copy(absoluteUrl(orderFormPath(groupBuy.slug)), "주문서 링크")}><Link2 />주문서 링크 복사</button>
-        <a className="gbx-btn" href={`${groupBuy.products.length === 1 ? productPath(groupBuy.slug, groupBuy.products[0].id) : orderFormPath(groupBuy.slug)}?preview=1`} target="_blank" rel="noreferrer">고객 화면<ArrowUpRight /></a>
+        <button type="button" className="gbx-btn" onClick={() => copy(orderLinkUrl(groupBuy.slug), "주문서 링크")}><Link2 />주문서 링크 복사</button>
+        <a className="gbx-btn" href={customerScreenUrl(groupBuy.slug, groupBuy.products.length === 1 ? groupBuy.products[0].id : undefined)} target="_blank" rel="noreferrer">고객 화면<ArrowUpRight /></a>
       </div>
     </header>
     <nav className="gbx-tabs" role="tablist" aria-label="공구 메뉴">
