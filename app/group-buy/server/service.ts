@@ -1,6 +1,6 @@
 import { pantsGroupBuy } from "../mock";
 import { GroupBuyError, lookupOrders, normalizePhone, submitOrder, validPhone, type SubmitRequest, type SubmitResult } from "../model";
-import { diffState, emptyChanges, orderPut, publicOrder, publicState, stockLogPut, storedGroupBuy, withOrderedQty, type Changes, type Versions } from "../sync";
+import { diffState, emptyChanges, groupBuySummaries, orderPut, publicOrder, publicState, scopeToGroupBuy, stockLogPut, storedGroupBuy, withOrderedQty, type Changes, type Versions } from "../sync";
 import type { GbOrder, GbStockLog, GroupBuyState } from "../types";
 import { backend } from "./backend";
 
@@ -29,9 +29,24 @@ const stateOf = (partial: Partial<GroupBuyState>): GroupBuyState => ({ version: 
 
 // ── 관리자 ───────────────────────────────────────────────
 
-export async function adminSnapshot() {
-  const { state, versions } = await backend().snapshot();
-  return { state: withOrderedQty(state), versions, storage: backend().kind };
+/**
+ * 관리자 화면 데이터. 응답 크기가 주문 수에 비례해 커지지 않도록(Vercel 응답 한도 4.5MB),
+ * 공구 목록은 공구 설정 + 공구별 요약만, 공구 상세는 그 공구의 주문·재고 기록만 보낸다.
+ * 옵션별 주문 수량(orderedQty)은 서버가 전체 주문으로 계산해 넣는다.
+ */
+export async function adminSnapshot(groupBuyId: string | null = null) {
+  const { state: full, versions } = await backend().snapshot();
+  const state = withOrderedQty(full);
+  const summaries = groupBuySummaries(state);
+  const scoped = scopeToGroupBuy(state, groupBuyId);
+  const orderIds = new Set(scoped.orders.map((order) => order.id));
+  return {
+    state: scoped,
+    versions: { groupBuys: versions.groupBuys, orders: Object.fromEntries(Object.entries(versions.orders).filter(([id]) => orderIds.has(id))) },
+    summaries,
+    scope: groupBuyId,
+    storage: backend().kind,
+  };
 }
 
 export async function adminCommit(changes: Changes) {

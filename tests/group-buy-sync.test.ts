@@ -66,9 +66,20 @@ test("서버: 데모 데이터 → 고객 주문(동시에 여러 건) → 조�
   // 데모 주문번호(1~N)와 새 주문번호가 겹치지 않게 순번을 올리고 데모를 넣는다.
   await backend().reserveOrderSeq(seed.orderSeq);
   await adminCommit(diffState({ ...seed, groupBuys: [], orders: [], stockLogs: [] }, seed, noVersions));
-  let snapshot = await adminSnapshot();
+  let snapshot = await adminSnapshot(DEMO_GROUP_BUY_ID);
   assert.equal(snapshot.state.orders.length, seed.orders.length);
   assert.ok(snapshot.state.orderSeq >= seed.orderSeq);
+
+  // 공구 목록 범위는 주문을 보내지 않고 공구별 건수만 보낸다. orderedQty는 상세와 같다.
+  const list = await adminSnapshot();
+  assert.equal(list.state.orders.length, 0);
+  assert.equal(list.state.stockLogs.length, 0);
+  assert.deepEqual(Object.keys(list.versions.orders), []);
+  assert.equal(list.summaries[DEMO_GROUP_BUY_ID].orders, seed.orders.filter((order) => !order.cancelledAt).length);
+  assert.equal(list.summaries[DEMO_GROUP_BUY_ID].waiting, seed.orders.filter((order) => !order.cancelledAt && order.status === "WAITING").length);
+  assert.deepEqual(list.state.groupBuys, snapshot.state.groupBuys);
+  // 없는 공구를 요청하면 주문 없이 돌려준다
+  assert.equal((await adminSnapshot("no-such-group-buy")).state.orders.length, 0);
 
   // 고객 화면에는 재고 수량이 가려진다
   const publicState = await publicGroupBuyState("pants");
@@ -96,7 +107,7 @@ test("서버: 데모 데이터 → 고객 주문(동시에 여러 건) → 조�
   assert.ok(manual.ok);
 
   // 주문 수량은 새 주문까지 반영된다
-  snapshot = await adminSnapshot();
+  snapshot = await adminSnapshot(DEMO_GROUP_BUY_ID);
   const ordered = snapshot.state.groupBuys[0].products[0].options.find((option) => option.id === optionId)!.orderedQty;
   assert.equal(ordered, withOrderedQty(snapshot.state).groupBuys[0].products[0].options.find((option) => option.id === optionId)!.orderedQty);
 
@@ -122,7 +133,7 @@ test("서버: 데모 데이터 → 고객 주문(동시에 여러 건) → 조�
   await assert.rejects(adminCommit({ groupBuys: [], orders: [{ op: "put", id: order.id, groupBuyId: order.groupBuyId, orderNo: order.orderNo, phone: order.phone, lookupToken: order.lookupToken, createdAt: order.createdAt, data: { ...order, sellerNote: "두 번째" }, version }], stockLogs: [], lookupLocks: [] }), ConflictError);
 
   // 관리자 변경(품절 해제)을 diff로 저장하면 다음 스냅샷에 반영된다
-  const fresh = await adminSnapshot();
+  const fresh = await adminSnapshot(DEMO_GROUP_BUY_ID);
   await adminCommit(diffState(fresh.state, setSoldOut(fresh.state, DEMO_GROUP_BUY_ID, soldOut.id, false), fresh.versions));
   assert.equal((await adminSnapshot()).state.groupBuys[0].products[0].options.find((option) => option.id === soldOut.id)!.soldOut, false);
 });

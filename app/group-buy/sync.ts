@@ -41,6 +41,44 @@ export function withOrderedQty(state: GroupBuyState): GroupBuyState {
   };
 }
 
+/** 공구 목록 화면용 공구별 주문 건수(취소 제외). 목록은 주문 전체 대신 이것만 받는다. */
+export type GroupBuyListSummary = { orders: number; waiting: number; ready: number };
+export type GroupBuySummaries = Record<string, GroupBuyListSummary>;
+
+export function groupBuySummaries(state: GroupBuyState): GroupBuySummaries {
+  const summaries: GroupBuySummaries = {};
+  for (const groupBuy of state.groupBuys) summaries[groupBuy.id] = { orders: 0, waiting: 0, ready: 0 };
+  for (const order of state.orders) {
+    if (order.cancelledAt) continue;
+    const summary = summaries[order.groupBuyId] ??= { orders: 0, waiting: 0, ready: 0 };
+    summary.orders += 1;
+    if (order.status === "WAITING") summary.waiting += 1;
+    if (order.status === "READY") summary.ready += 1;
+  }
+  return summaries;
+}
+
+/**
+ * 공구 하나의 주문·재고 기록만 남긴다(groupBuyId가 null이면 주문·재고 기록 없이 공구 설정만).
+ * 공구 설정·orderedQty·조회 잠금·주문번호 순번은 그대로 둔다.
+ */
+export function scopeToGroupBuy(state: GroupBuyState, groupBuyId: string | null): GroupBuyState {
+  const groupBuy = groupBuyId ? state.groupBuys.find((item) => item.id === groupBuyId) : undefined;
+  if (!groupBuy) return { ...state, orders: [], stockLogs: [] };
+  const optionIds = new Set(groupBuy.products.flatMap((product) => product.options.map((option) => option.id)));
+  return {
+    ...state,
+    orders: state.orders.filter((order) => order.groupBuyId === groupBuy.id),
+    stockLogs: state.stockLogs.filter((log) => optionIds.has(log.optionId)),
+  };
+}
+
+/** 받은 주문으로 orderedQty를 다시 계산하되, 지정한 공구만 고친다(주문을 일부만 들고 있을 때 나머지 공구 값을 지키려고). */
+export function withOrderedQtyFor(state: GroupBuyState, groupBuyIds: Set<string>): GroupBuyState {
+  const recomputed = withOrderedQty(state);
+  return { ...state, groupBuys: state.groupBuys.map((groupBuy, index) => groupBuyIds.has(groupBuy.id) ? recomputed.groupBuys[index] : groupBuy) };
+}
+
 // 키 순서와 상관없이 비교한다(Postgres jsonb는 키 순서를 바꿔 저장한다).
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;

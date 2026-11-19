@@ -15,7 +15,7 @@ import { ManualOrderV2, TrackingImportV2 } from "./dialogs-v2";
 import { SettingsV2 } from "./settings-v2";
 import { priceCart } from "./pricing";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
-import { insertExampleGroupBuy, onGroupBuySyncError, reloadGroupBuyState, unlockAdmin, updateGroupBuyState, useGroupBuyState, useGroupBuySync } from "./store";
+import { insertExampleGroupBuy, onGroupBuySyncError, reloadGroupBuyState, unlockAdmin, updateGroupBuyState, useGroupBuyState, useGroupBuySummaries, useGroupBuySync } from "./store";
 import type { GbOrder, GbProduct, GroupBuy, GroupBuyState } from "./types";
 import { compareOptionAttrs } from "./variant-order";
 import { absoluteUrl, AdminBaseContext, CartPicker, cartLines, customerScreenUrl, dateTime, downloadBytes, longDateTime, lookupPath, orderLinkUrl, orderViewPath, useAdminPath, ProductThumb, type Cart, won } from "./ui";
@@ -85,6 +85,7 @@ function SyncGate() {
 
 function ListPage({ state }: { state: GroupBuyState }) {
   const adminPath = useAdminPath();
+  const summaries = useGroupBuySummaries();
   const run = useRun();
   const copy = useCopy();
   const router = useRouter();
@@ -99,9 +100,8 @@ function ListPage({ state }: { state: GroupBuyState }) {
       <button type="button" className="gbx-btn primary" onClick={create}><Plus />새 공구</button>
     </header>
     <ul className="gbx-list">{groupBuys.map((groupBuy) => {
-      const orders = state.orders.filter((order) => order.groupBuyId === groupBuy.id && !order.cancelledAt);
-      const waiting = orders.filter((order) => order.status === "WAITING").length;
-      const ready = orders.filter((order) => order.status === "READY").length;
+      // 목록은 주문 전체를 받지 않고 서버가 센 공구별 건수만 쓴다.
+      const { orders: orderCount, waiting, ready } = summaries[groupBuy.id] ?? { orders: 0, waiting: 0, ready: 0 };
       const low = stockReport(state, groupBuy).filter((row) => row.shortage > 0).length;
       const cover = groupBuy.products[0]?.images[0] ?? "";
       return <li key={groupBuy.id}>
@@ -112,7 +112,7 @@ function ListPage({ state }: { state: GroupBuyState }) {
             <span>{shortDate(groupBuy.opensAt)} – {shortDate(groupBuy.closesAt)} · {dday(groupBuy, now)}</span>
           </div>
           <dl className="gbx-list-stats">
-            <div><dt>주문</dt><dd>{orders.length}</dd></div>
+            <div><dt>주문</dt><dd>{orderCount}</dd></div>
             <div><dt>입금 대기</dt><dd className={waiting ? "red" : ""}>{waiting}</dd></div>
             <div><dt>출력 대기</dt><dd>{ready}</dd></div>
             <div><dt>재고</dt><dd className={low ? "red" : "muted"}>{low ? `부족 ${low}` : "여유"}</dd></div>
@@ -736,7 +736,7 @@ function StockView({ state, groupBuy }: { state: GroupBuyState; groupBuy: GroupB
 // ── 화면 ─────────────────────────────────────────────────
 
 export default function GroupBuyAdminV2({ groupBuyId, tab, basePath = "" }: { groupBuyId?: string; tab?: string; basePath?: string }) {
-  const state = useGroupBuyState();
+  const state = useGroupBuyState(groupBuyId ?? null);
   const [toast, setToast] = useState<Toast | null>(null);
   const show = useCallback((next: Omit<Toast, "id">) => setToast({ ...next, id: Date.now() }), []);
   useEffect(() => {
