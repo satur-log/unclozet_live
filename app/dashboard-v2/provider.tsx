@@ -7,14 +7,16 @@ import {
   fetchRemoteDashboardState,
   RemoteDashboardError,
   remoteSavePending,
-  saveRemoteDashboardState,
+  saveRemoteDashboardChanges,
 } from "./remote-repository";
+import { applyRowVersions, diffDashboard, emptyRowVersions, hasDashboardChanges, type RowVersions } from "./row-sync";
 import { hasMeaningfulDashboardChange, isDashboardState, DashboardStorageError, dashboardStorageFailure, LOCAL_TEST_STORAGE_KEY, STORAGE_KEY, saveMockState } from "./repository";
 import type { DashboardState } from "./types";
 
 // 데이터 원본
-// - shared(운영): Supabase 하나뿐. 브라우저는 /api/dashboard/state로만 읽고 쓰며, 브라우저 복사본을 만들거나 올리지 않는다.
-//   저장은 "마지막으로 본 버전" 기준이라, 다른 기기가 먼저 저장했으면 최신 데이터 위에 내 변경을 다시 적용해 저장한다.
+// - shared(운영): Supabase 하나뿐. 브라우저는 /api/dashboard/*로만 읽고 쓰며, 브라우저 복사본을 만들거나 올리지 않는다.
+//   방송·고객은 행 단위로 저장한다. 저장할 때는 바뀐 행만 "마지막으로 본 행 버전"과 함께 보내고,
+//   다른 기기가 같은 행을 먼저 고쳤으면 최신 데이터 위에 내 변경을 다시 적용해 저장한다.
 // - local-test(/test) · Supabase 미설정 개발 환경: 이 브라우저의 localStorage만 쓴다.
 
 export type SyncStatus = "loading" | "saving" | "synced" | "error" | "local";
@@ -89,7 +91,9 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
 
   const stateRef = useRef<DashboardState | null>(null);
   const backendRef = useRef<"remote" | "local" | null>(null);
-  const baseUpdatedAt = useRef("");
+  /** 서버에 저장된 것으로 알고 있는 모습과 행 버전. 저장할 때 이것과 화면을 비교해 바뀐 행만 보낸다. */
+  const savedRef = useRef<DashboardState | null>(null);
+  const versionsRef = useRef<RowVersions>(emptyRowVersions());
   const unsaved = useRef<Change[]>([]);
   const saving = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -117,10 +121,14 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
       while (unsaved.current.length && mounted.current) {
         const count = unsaved.current.length;
         const snapshot = stateRef.current!;
+        const changes = diffDashboard(savedRef.current!, snapshot, versionsRef.current);
         setSyncStatus("saving");
         try {
-          const { updatedAt } = await saveRemoteDashboardState(snapshot, baseUpdatedAt.current);
-          baseUpdatedAt.current = updatedAt;
+          if (hasDashboardChanges(changes)) {
+            const { versions } = await saveRemoteDashboardChanges(changes);
+            versionsRef.current = applyRowVersions(versionsRef.current, changes, versions);
+          }
+          savedRef.current = snapshot;
           unsaved.current.splice(0, count);
         } catch (error) {
           if (error instanceof RemoteDashboardError && error.code === "LOCKED") { goToLogin(); return; }
@@ -129,7 +137,8 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
           // 다른 기기·탭이 먼저 저장했다. 최신 데이터를 받아 그 위에 아직 저장하지 못한 내 변경을 순서대로 다시 적용한다.
           const latest = await fetchRemoteDashboardState();
           if (latest.mode !== "remote") throw new Error("Supabase 설정을 확인할 수 없어 저장을 멈췄어요.");
-          baseUpdatedAt.current = latest.updatedAt;
+          savedRef.current = latest.state;
+          versionsRef.current = latest.versions;
           let rebased = latest.state;
           try { for (const change of unsaved.current) rebased = change(rebased); }
           catch {
@@ -190,7 +199,8 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
       if (remote.mode === "local") { loadLocal(); return; }
       backendRef.current = "remote";
       setBackend("remote");
-      baseUpdatedAt.current = remote.updatedAt;
+      savedRef.current = remote.state;
+      versionsRef.current = remote.versions;
       unsaved.current = [];
       show(remote.state);
       setUnsentCopy(readUnsentLegacyCopy(remote.state));
