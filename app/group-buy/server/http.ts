@@ -1,11 +1,11 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { GroupBuyError } from "../model";
 import { ConfigError, ConflictError } from "./backend";
+import { ADMIN_COOKIE, adminCookieValid, adminCookieValue as sharedCookieValue, adminPasscodeMatches } from "../../../lib/admin-auth";
 
 // 공구 API 공통: 오류를 화면에 보여줄 문장으로 바꾸고, 관리자 비밀번호(선택)를 확인한다.
 
-export const ADMIN_COOKIE = "gb_admin";
+export { ADMIN_COOKIE };
 
 const noStore = { "Cache-Control": "no-store" };
 export const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: noStore });
@@ -18,24 +18,13 @@ export function failure(error: unknown) {
   return json({ error: "서버에서 처리하지 못했어요. 잠시 후 다시 시도해 주세요.", code: "SERVER" }, 500);
 }
 
-/** GB_ADMIN_PASSCODE를 넣으면 관리자 API에 비밀번호가 걸린다. 비워두면 열려 있다(로그인 붙이기 전 테스트용). */
-const passcode = () => process.env.GB_ADMIN_PASSCODE?.trim() ?? "";
-export const adminCookieValue = (code: string) => createHash("sha256").update(`${code}:unclozet-gb-admin`).digest("hex");
-
+/** 관리자 비밀번호 확인은 lib/admin-auth.ts에서 한다(대시보드와 공유). */
+export const adminCookieValue = sharedCookieValue;
 export function adminLocked(request: NextRequest) {
-  const code = passcode();
-  if (!code) return false;
-  const cookie = request.cookies.get(ADMIN_COOKIE)?.value ?? "";
-  const expected = adminCookieValue(code);
-  return cookie.length !== expected.length || !timingSafeEqual(Buffer.from(cookie), Buffer.from(expected));
+  return !adminCookieValid(request.cookies.get(ADMIN_COOKIE)?.value);
 }
-
 export function checkPasscode(input: string) {
-  const code = passcode();
-  if (!code) return true;
-  const a = Buffer.from(adminCookieValue(input));
-  const b = Buffer.from(adminCookieValue(code));
-  return timingSafeEqual(a, b);
+  return adminPasscodeMatches(input);
 }
 
 export const lockedResponse = () => json({ error: "관리자 비밀번호를 입력해 주세요.", code: "LOCKED" }, 401);

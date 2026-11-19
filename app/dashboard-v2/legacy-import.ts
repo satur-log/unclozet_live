@@ -153,7 +153,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function parseMemos(value: unknown): LegacyMemo[] {
+export function parseMemos(value: unknown): LegacyMemo[] {
   if (!Array.isArray(value)) throw new Error("기존 방송 데이터 형식이 올바르지 않습니다.");
   return value.map((row) => {
     if (!isRecord(row)) throw new Error("기존 방송 데이터 형식이 올바르지 않습니다.");
@@ -168,7 +168,7 @@ function parseMemos(value: unknown): LegacyMemo[] {
   });
 }
 
-function parseRounds(value: unknown): LegacyShippingRound[] {
+export function parseRounds(value: unknown): LegacyShippingRound[] {
   if (!Array.isArray(value)) throw new Error("기존 배송 데이터 형식이 올바르지 않습니다.");
   return value.flatMap((row) => {
     if (!isRecord(row) || !Array.isArray(row.participants)) return [];
@@ -185,18 +185,8 @@ function parseRounds(value: unknown): LegacyShippingRound[] {
   });
 }
 
-export async function fetchLegacyData() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("기존 데이터 연결 정보가 없습니다.");
-  const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const [memosResponse, roundsResponse] = await Promise.all([
-    fetch(`${url}/rest/v1/live_memos?select=id,title,memo,paid_nicknames,created_at,updated_at&order=created_at.asc`, { headers }),
-    fetch(`${url}/rest/v1/shipping_rounds?select=id,participants,created_at,updated_at&order=created_at.asc`, { headers }),
-  ]);
-  if (!memosResponse.ok || !roundsResponse.ok) throw new Error("기존 방송 데이터를 불러오지 못했습니다.");
-  return { memos: parseMemos(await memosResponse.json()), rounds: parseRounds(await roundsResponse.json()) };
-}
+// 레거시(live_memos·shipping_rounds) 자동 가져오기는 제거했다. 브라우저가 anon 키로 읽고 V2 데이터에 병합하던 경로라
+// 지운 방송·고객을 되살릴 수 있었다. mergeLegacyData는 수동 복구가 필요할 때를 위해 남겨둔다.
 
 export function legacyImportCompleted(storage: ImportStorage) {
   return storage.getItem(LEGACY_IMPORT_KEY) === "completed";

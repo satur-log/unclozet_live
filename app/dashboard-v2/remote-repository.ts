@@ -2,56 +2,41 @@ import { canonicalInstagramId } from "./shipping-parser";
 import { isDashboardState } from "./repository";
 import type { Broadcast, Customer, DashboardState } from "./types";
 
-export const REMOTE_WORKSPACE_ID = "main";
 export const REMOTE_MIGRATION_KEY = "unclozet-dashboard-v2-remote-migration-v1";
 export const REMOTE_PENDING_KEY = "unclozet-dashboard-v2-remote-pending-v1";
 
 type MigrationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-function supabaseConfig() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  return url && key ? { url, key } : null;
+// 브라우저는 Supabase에 직접 접근하지 않는다. 관리자 쿠키가 있어야 통과하는 /api/dashboard/state를 거친다.
+
+export type RemoteWorkspace = { mode: "remote"; state: DashboardState; updatedAt: string } | { mode: "local" };
+
+export class RemoteDashboardError extends Error {
+  constructor(message: string, public code: string, public status: number) { super(message); this.name = "RemoteDashboardError"; }
 }
 
-function headers(key: string) {
-  return { apikey: key, Authorization: `Bearer ${key}` };
+async function call<T>(init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch("/api/dashboard/state", { ...init, cache: "no-store", credentials: "same-origin", headers: { "Content-Type": "application/json", ...init?.headers } });
+  } catch {
+    throw new RemoteDashboardError("서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.", "NETWORK", 0);
+  }
+  const body = await response.json().catch(() => null) as ({ error?: string; code?: string } & T) | null;
+  if (!response.ok) throw new RemoteDashboardError(body?.error ?? `요청에 실패했어요. (${response.status})`, body?.code ?? "SERVER", response.status);
+  return body as T;
 }
 
-export function hasRemoteDashboardConfig() {
-  return Boolean(supabaseConfig());
+export async function fetchRemoteDashboardState(): Promise<RemoteWorkspace> {
+  const body = await call<RemoteWorkspace>();
+  if (body.mode === "remote" && !isDashboardState(body.state)) throw new RemoteDashboardError("Supabase의 V2 데이터 형식이 올바르지 않아요.", "INVALID", 200);
+  return body;
 }
 
-export async function fetchRemoteDashboardState(): Promise<DashboardState | null> {
-  const config = supabaseConfig();
-  if (!config) return null;
-  const response = await fetch(
-    `${config.url}/rest/v1/dashboard_v2_workspaces?id=eq.${REMOTE_WORKSPACE_ID}&select=state&limit=1`,
-    { headers: headers(config.key), cache: "no-store" },
-  );
-  if (!response.ok) throw new Error("공유 데이터를 불러오지 못했습니다.");
-  const rows: unknown = await response.json();
-  if (!Array.isArray(rows) || rows.length === 0) return null;
-  const state = (rows[0] as { state?: unknown }).state;
-  if (!isDashboardState(state)) throw new Error("Supabase의 V2 데이터 형식이 올바르지 않습니다.");
-  return state;
-}
-
-export async function saveRemoteDashboardState(state: DashboardState) {
-  const config = supabaseConfig();
-  if (!config) return;
+/** baseUpdatedAt 이후 다른 곳에서 저장했으면 code "CONFLICT"로 실패한다. */
+export async function saveRemoteDashboardState(state: DashboardState, baseUpdatedAt: string) {
   if (!isDashboardState(state)) throw new Error("저장할 V2 데이터 형식이 올바르지 않습니다.");
-  const timestamp = new Date().toISOString();
-  const response = await fetch(`${config.url}/rest/v1/dashboard_v2_workspaces?on_conflict=id`, {
-    method: "POST",
-    headers: {
-      ...headers(config.key),
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify({ id: REMOTE_WORKSPACE_ID, state, updated_at: timestamp }),
-  });
-  if (!response.ok) throw new Error("Supabase에 공유 데이터를 저장하지 못했습니다.");
+  return call<{ updatedAt: string }>({ method: "PUT", body: JSON.stringify({ state, baseUpdatedAt }) });
 }
 
 function newer<T extends { updatedAt: string }>(left: T, right: T) {
@@ -100,20 +85,8 @@ export function mergeDashboardStates(remote: DashboardState, local: DashboardSta
   };
 }
 
-export function remoteMigrationCompleted(storage: MigrationStorage) {
-  return storage.getItem(REMOTE_MIGRATION_KEY) === "completed";
-}
-
-export function markRemoteMigrationCompleted(storage: MigrationStorage) {
-  storage.setItem(REMOTE_MIGRATION_KEY, "completed");
-}
-
 export function remoteSavePending(storage: MigrationStorage) {
   return storage.getItem(REMOTE_PENDING_KEY) === "pending";
-}
-
-export function markRemoteSavePending(storage: MigrationStorage) {
-  storage.setItem(REMOTE_PENDING_KEY, "pending");
 }
 
 export function clearRemoteSavePending(storage: MigrationStorage) {
