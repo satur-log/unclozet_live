@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { adminLocked, json, lockedResponse } from "../../../group-buy/server/http";
-import { readWorkspace, WorkspaceConfigError, WorkspaceConflictError, WorkspaceMissingError, writeWorkspace } from "../../../dashboard-v2/server/workspace-store";
+import { readWorkspace, workspaceProjectRef, WorkspaceConfigError, WorkspaceConflictError, WorkspaceMissingError, writeWorkspace } from "../../../dashboard-v2/server/workspace-store";
 import type { DashboardState } from "../../../dashboard-v2/types";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const workspace = await readWorkspace();
     if (!workspace) return json({ mode: "local" });
-    return json({ mode: "remote", ...workspace });
+    return json({ mode: "remote", project: workspaceProjectRef(), ...workspace });
   } catch (error) { return failure(error); }
 }
 

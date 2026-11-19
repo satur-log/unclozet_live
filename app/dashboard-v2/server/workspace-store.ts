@@ -25,6 +25,12 @@ function config(): Config | null {
 
 export type Workspace = { state: DashboardState; updatedAt: string };
 
+/** 연결된 Supabase 프로젝트 ref(공개값). Preview가 테스트 DB를 쓰는지 확인하는 용도. */
+export function workspaceProjectRef() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  return url.match(/^https:\/\/([a-z0-9]+)\./i)?.[1] ?? null;
+}
+
 /** null = 개발 환경에서 Supabase 미설정(브라우저 로컬 모드로 동작) */
 export async function readWorkspace(): Promise<Workspace | null> {
   const c = config();
