@@ -11,6 +11,7 @@ import {
 import { analyzeSettlement } from "./settlement";
 import type { Broadcast, Customer, Delivery, Order, OrderStatus } from "./types";
 import { useDashboard } from "./provider";
+import { broadcastSummary, needsReview } from "./summary";
 import { Shell } from "./shell";
 import { Modal } from "../group-buy/dialogs-v2";
 import "../group-buy/admin-v2.css";
@@ -45,8 +46,6 @@ export function CustomerPill({ customer }: { customer: Customer }) {
   return <span className={`gbx-pill ${tone}`}>{customerStatusLabel(customer)}</span>;
 }
 
-/** 주문서가 들어온 주문 중 고칠 게 남은 것만 "검토 필요"로 본다. */
-const needsReview = (broadcast: Broadcast, order: Order) => Boolean(order.sourceText) && orderIssues(broadcast, order).length > 0;
 /** 이 방송 날짜 이후에 체크된 고객의 입금 전 주문. 상태는 입금 전 그대로 두고 표시만 바꾼다. */
 const broadcastDay = (broadcast: Broadcast) => new Date(broadcast.createdAt).toLocaleDateString("en-CA");
 export const checkedInBroadcast = (customer: Customer | undefined, broadcast: Broadcast, order: Order) =>
@@ -60,9 +59,10 @@ export const broadcastsV2Path = (basePath: string, broadcastId?: string) => broa
 // ── 목록 ─────────────────────────────────────────────────
 
 function BroadcastListV2({ basePath }: { basePath: string }) {
-  const { state, commit } = useDashboard();
+  const { state, summaries, commit } = useDashboard();
   const router = useRouter();
-  const broadcasts = [...state.broadcasts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // 전체를 받기 전에는 서버가 준 요약으로, 받은 뒤에는 화면 데이터로 계산한 요약으로 그린다(같은 계산).
+  const broadcasts = useMemo(() => [...(summaries ?? state.broadcasts.map(broadcastSummary))].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [summaries, state.broadcasts]);
   function create() {
     let broadcastId = "";
     const saved = commit((current) => { const result = addBroadcast(current, `방송 ${broadcastTitle(new Date().toISOString())}`); broadcastId = result.broadcastId; return result.state; }, "새 방송을 만들었습니다.");
@@ -71,19 +71,17 @@ function BroadcastListV2({ basePath }: { basePath: string }) {
   return <>
     <header className="gbx-head"><h1>방송 내역</h1><button type="button" className="gbx-btn primary" onClick={create}><Plus />새 방송</button></header>
     {broadcasts.length ? <ul className="gbx-list">{broadcasts.map((broadcast) => {
-      const count = (status: OrderStatus) => broadcast.orders.filter((order) => order.status === status).length;
-      const waiting = count("WAITING");
-      const review = broadcast.orders.filter((order) => needsReview(broadcast, order)).length;
+      const { waiting, review } = broadcast;
       return <li key={broadcast.id}>
         <Link href={broadcastsV2Path(basePath, broadcast.id)} className="gbx-list-row gbx-bc-row">
           <div className="gbx-list-main">
             <div><strong>{broadcast.title}</strong>{review ? <span className="gbx-pill waiting">검토 {review}</span> : null}</div>
           </div>
           <dl className="gbx-list-stats gbx-bc-stats">
-            <div><dt>주문</dt><dd>{broadcast.orders.length}</dd></div>
+            <div><dt>주문</dt><dd>{broadcast.orders}</dd></div>
             <div><dt>입금 전</dt><dd className={waiting ? "red" : ""}>{waiting}</dd></div>
-            <div><dt>출력 대기</dt><dd>{count("READY")}</dd></div>
-            <div><dt>출력 완료</dt><dd className="muted">{count("COMPLETED")}</dd></div>
+            <div><dt>출력 대기</dt><dd>{broadcast.ready}</dd></div>
+            <div><dt>출력 완료</dt><dd className="muted">{broadcast.completed}</dd></div>
           </dl>
           <ChevronRight className="gbx-list-arrow" />
         </Link>

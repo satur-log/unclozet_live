@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { adminLocked, json, lockedResponse } from "../../../group-buy/server/http";
-import { readBroadcast, readBroadcastPage, readCustomers, workspaceConfigured, workspaceProjectRef } from "../../../dashboard-v2/server/workspace-store";
+import { readBroadcast, readBroadcastPage, readBroadcastSummaries, readCustomers, workspaceConfigured, workspaceProjectRef } from "../../../dashboard-v2/server/workspace-store";
 import { dashboardFailure } from "../../../dashboard-v2/server/http";
 import { BROADCAST_PAGE_SIZE } from "../../../dashboard-v2/row-sync";
 
@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * ?part=customers            → 고객 전체와 행 버전
  * ?part=broadcasts&offset=N&limit=M → 방송 한 페이지(최신 먼저, 최대 BROADCAST_PAGE_SIZE건)와 전체 방송 수
+ * ?part=summaries           → 방송 목록 화면용 요약 전체(방송 내용 없이)
  * ?part=broadcast&id=…       → 방송 한 건(상세 화면을 먼저 그리려고)
  * Supabase 미설정 개발 환경이면 { mode: "local" }.
  */
@@ -26,6 +27,10 @@ export async function GET(request: NextRequest) {
       const limit = Math.min(BROADCAST_PAGE_SIZE, Math.max(1, Math.floor(Number(params.get("limit")) || BROADCAST_PAGE_SIZE)));
       const result = await readBroadcastPage(offset, limit);
       return json({ mode: "remote", project: workspaceProjectRef(), offset, pageSize: limit, ...result });
+    }
+    if (params.get("part") === "summaries") {
+      const result = await readBroadcastSummaries();
+      return json({ mode: "remote", project: workspaceProjectRef(), ...result });
     }
     if (params.get("part") === "broadcast") {
       const result = await readBroadcast(params.get("id") ?? "");

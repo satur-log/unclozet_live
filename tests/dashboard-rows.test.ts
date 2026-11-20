@@ -54,3 +54,17 @@ test("방송 순서는 최신 먼저(서버 페이지 순서와 같음)", () => 
   const sorted = sortBroadcasts([{ id: "a", createdAt: "2026-01-01" }, { id: "b", createdAt: "2026-03-01" }, { id: "c", createdAt: "2026-02-01" }] as never);
   assert.deepEqual(sorted.map((item: { id: string }) => item.id), ["b", "c", "a"]);
 });
+
+test("목록 요약: 상태별 건수와 형식 검사", async () => {
+  const { broadcastSummary, isBroadcastSummary, SUMMARY_KIND } = await import("../app/dashboard-v2/summary");
+  const { state, broadcastIds } = seeded();
+  const broadcast = state.broadcasts.find((item) => item.id === broadcastIds[0])!;
+  const summary = broadcastSummary(broadcast);
+  assert.equal(summary.k, SUMMARY_KIND);
+  assert.equal(summary.id, broadcast.id);
+  assert.equal(summary.orders, broadcast.orders.length);
+  assert.equal(summary.waiting + summary.ready + summary.completed, broadcast.orders.length);
+  assert.equal(isBroadcastSummary(summary), true);
+  assert.equal(isBroadcastSummary({ ...summary, k: SUMMARY_KIND + 1 }), false, "계산 방식이 바뀐 요약은 다시 계산한다");
+  assert.equal(isBroadcastSummary(null), false);
+});

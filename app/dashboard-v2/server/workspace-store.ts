@@ -1,6 +1,7 @@
 import { isDashboardState } from "../repository";
 import type { DashboardChanges, RowVersions } from "../row-sync";
 import type { Broadcast, Customer } from "../types";
+import { broadcastSummary, isBroadcastSummary, type BroadcastSummary } from "../summary";
 
 // V2 대시보드 저장소(서버 전용). service_role 키로만 Supabase에 접근한다.
 // 방송·고객을 행 단위 표(dashboard_v2_broadcasts / dashboard_v2_customers)에 저장한다.
@@ -38,6 +39,7 @@ async function call<T>(c: Config, pathAndQuery: string, init: RequestInit = {}):
   if (!response.ok) {
     const message = (body as { message?: string } | null)?.message ?? `Supabase 요청 실패 (${response.status})`;
     if (message.startsWith("DASH_CONFLICT")) throw new WorkspaceConflictError("다른 곳에서 먼저 저장한 내용이 있어요.");
+    if (/summary/.test(message) && /column|does not exist/i.test(message)) throw new WorkspaceConfigError("Supabase에 방송 요약 칸이 없어요. supabase/dashboard_v2_summary.sql을 SQL Editor에서 실행해 주세요.");
     if (response.status === 404 && /dashboard_v2_/.test(message)) throw new WorkspaceConfigError("Supabase에 새 대시보드 표가 없어요. supabase/dashboard_v2_rows.sql을 SQL Editor에서 실행해 주세요.");
     throw new Error(message);
   }
@@ -94,6 +96,37 @@ export async function readBroadcastPage(offset: number, limit: number): Promise<
   return { broadcasts: body.map((row) => row.data), versions, total: Number.isFinite(total) ? total : body.length };
 }
 
+/**
+ * 방송 목록 화면용 요약 전체(최신 먼저). 방송 내용(data)은 받지 않아 방송이 많아도 몇 KB다.
+ * 요약이 비어 있거나 계산 방식이 바뀐 방송은 그 방송만 받아 계산하고, 그 버전 그대로일 때만 summary 칸을 채운다
+ * (data·version은 바꾸지 않는다. 그 사이 다른 곳에서 고쳤으면 채우지 않고 다음에 다시 계산한다).
+ */
+export async function readBroadcastSummaries(): Promise<{ summaries: BroadcastSummary[] } | null> {
+  const c = config();
+  if (!c) return null;
+  await ensureMigrated(c);
+  const rows: { id: string; summary: unknown; version: number }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { body } = await call<typeof rows>(c, "/dashboard_v2_broadcasts?select=id,summary,version&order=created_at.desc,id.asc", { headers: { Range: `${from}-${from + 999}`, "Range-Unit": "items" } });
+    rows.push(...body);
+    if (body.length < 1000) break;
+  }
+  const missing = rows.filter((row) => !isBroadcastSummary(row.summary) || row.summary.id !== row.id).map((row) => row.id);
+  const filled = new Map<string, BroadcastSummary>();
+  for (let index = 0; index < missing.length; index += 20) {
+    const ids = missing.slice(index, index + 20).map((id) => `"${id.replace(/["\\]/g, "")}"`).join(",");
+    const { body } = await call<{ id: string; data: unknown; version: number }[]>(c, `/dashboard_v2_broadcasts?select=id,data,version&id=in.(${encodeURIComponent(ids)})`);
+    await Promise.all(body.map(async (row) => {
+      if (!validBroadcast(row.data)) throw new Error("Supabase의 방송 데이터 형식이 올바르지 않아요.");
+      const summary = broadcastSummary(row.data);
+      filled.set(row.id, summary);
+      await call(c, `/dashboard_v2_broadcasts?id=eq.${encodeURIComponent(row.id)}&version=eq.${row.version}`, { method: "PATCH", body: JSON.stringify({ summary }), headers: { Prefer: "return=minimal" } }).catch(() => undefined);
+    }));
+  }
+  const summaries = rows.map((row) => filled.get(row.id) ?? row.summary).filter(isBroadcastSummary);
+  return { summaries };
+}
+
 /** 방송 한 건(상세 화면을 먼저 그리려고). 없으면 null. */
 export async function readBroadcast(id: string): Promise<{ broadcast: Broadcast; version: number } | null | undefined> {
   const c = config();
@@ -113,6 +146,8 @@ export async function commitDashboard(changes: DashboardChanges): Promise<RowVer
   await ensureMigrated(c);
   for (const change of changes.broadcasts) if (change.op === "put" && (change.id !== change.data.id || !validBroadcast(change.data))) throw new Error("저장할 방송 데이터 형식이 올바르지 않아요.");
   for (const change of changes.customers) if (change.op === "put" && (change.id !== change.data.id || !validCustomer(change.data))) throw new Error("저장할 고객 데이터 형식이 올바르지 않아요.");
-  const { body } = await call<Partial<RowVersions>>(c, "/rpc/dashboard_v2_commit", { method: "POST", body: JSON.stringify({ changes }) });
+  // 방송을 넣거나 고칠 때 목록용 요약도 같은 트랜잭션에 함께 저장한다.
+  const payload = { ...changes, broadcasts: changes.broadcasts.map((change) => change.op === "put" ? { ...change, summary: broadcastSummary(change.data) } : change) };
+  const { body } = await call<Partial<RowVersions>>(c, "/rpc/dashboard_v2_commit", { method: "POST", body: JSON.stringify({ changes: payload }) });
   return { broadcasts: body?.broadcasts ?? {}, customers: body?.customers ?? {} };
 }

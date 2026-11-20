@@ -2,6 +2,7 @@ import { canonicalInstagramId } from "./shipping-parser";
 import { isDashboardState } from "./repository";
 import { BROADCAST_PAGE_SIZE, sortBroadcasts, type DashboardChanges, type RowVersions } from "./row-sync";
 import type { Broadcast, Customer, DashboardState } from "./types";
+import type { BroadcastSummary } from "./summary";
 
 export const REMOTE_MIGRATION_KEY = "unclozet-dashboard-v2-remote-migration-v1";
 export const REMOTE_PENDING_KEY = "unclozet-dashboard-v2-remote-pending-v1";
@@ -32,29 +33,33 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 type LocalReply = { mode: "local" };
 export type CustomersReply = { mode: "remote"; project: string | null; customers: Customer[]; versions: Record<string, number> };
 export type BroadcastPageReply = { mode: "remote"; project: string | null; broadcasts: Broadcast[]; versions: Record<string, number>; total: number; pageSize: number };
+export type SummariesReply = { mode: "remote"; project: string | null; summaries: BroadcastSummary[] };
 export type SingleBroadcastReply = { mode: "remote"; broadcast: Broadcast | null; version: number | null };
 
 const broadcastPage = (offset: number, limit = BROADCAST_PAGE_SIZE) => call<BroadcastPageReply | LocalReply>(`/api/dashboard/state?part=broadcasts&offset=${offset}&limit=${limit}`);
 
 /**
  * 화면에 필요한 것부터 받는다. 요청은 모두 동시에 시작하고, 각 부분은 도착하는 대로 쓸 수 있다.
- * - firstPage: 최신 방송 firstLimit건(목록 화면을 먼저 그리는 용도)
+ * - summaries: 방송 목록 화면용 요약(방송 내용 없이, 가장 빨리 온다)
+ * - firstPage: 최신 방송 firstLimit건
  * - broadcast: 상세 화면의 방송 한 건
  * - full: 전체(고객 + 모든 방송). 수정·저장은 이것을 받은 뒤에만 한다.
  */
 export type DashboardLoad = {
   customers: Promise<CustomersReply | LocalReply>;
+  summaries: Promise<SummariesReply | LocalReply> | null;
   firstPage: Promise<BroadcastPageReply | LocalReply>;
   broadcast: Promise<SingleBroadcastReply | LocalReply> | null;
   full: Promise<RemoteWorkspace>;
 };
 
-export function startDashboardLoad({ firstLimit = BROADCAST_PAGE_SIZE, broadcastId }: { firstLimit?: number; broadcastId?: string } = {}): DashboardLoad {
+export function startDashboardLoad({ firstLimit = BROADCAST_PAGE_SIZE, broadcastId, summaries: wantSummaries = false }: { firstLimit?: number; broadcastId?: string; summaries?: boolean } = {}): DashboardLoad {
+  const summaries = wantSummaries ? call<SummariesReply | LocalReply>("/api/dashboard/state?part=summaries") : null;
   const customers = call<CustomersReply | LocalReply>("/api/dashboard/state?part=customers");
   const firstPage = broadcastPage(0, firstLimit);
   const broadcast = broadcastId ? call<SingleBroadcastReply | LocalReply>(`/api/dashboard/state?part=broadcast&id=${encodeURIComponent(broadcastId)}`) : null;
   // 화면이 먼저 쓰지 않고 넘어가도 "처리되지 않은 오류"로 남지 않게 한다(full에서 다시 확인한다).
-  for (const early of [customers, firstPage, broadcast]) early?.catch(() => undefined);
+  for (const early of [summaries, customers, firstPage, broadcast]) early?.catch(() => undefined);
   const full = (async (): Promise<RemoteWorkspace> => {
     const [customerReply, first] = await Promise.all([customers, firstPage]);
     if (customerReply.mode === "local" || first.mode === "local") return { mode: "local" };
@@ -76,7 +81,7 @@ export function startDashboardLoad({ firstLimit = BROADCAST_PAGE_SIZE, broadcast
     if (!isDashboardState(state)) throw new RemoteDashboardError("Supabase의 V2 데이터 형식이 올바르지 않아요.", "INVALID", 200);
     return { mode: "remote", state, versions: { broadcasts: broadcastVersions, customers: customerReply.versions }, project: first.project };
   })();
-  return { customers, firstPage, broadcast, full };
+  return { summaries, customers, firstPage, broadcast, full };
 }
 
 export function fetchRemoteDashboardState(): Promise<RemoteWorkspace> {
