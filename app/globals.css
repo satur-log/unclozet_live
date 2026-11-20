@@ -69,6 +69,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--uc-ink); box-sha
 .v2-toast > span { display: grid; place-items: center; width: 20px; height: 20px; }
 .v2-toast button { border: 0; background: transparent; color: var(--uc-surface); font-size: var(--uc-fs-18); cursor: pointer; }
 .v2-refresh-notice { position: fixed; z-index: var(--uc-z-notice); top: 18px; left: 50%; padding: var(--uc-space-8) var(--uc-space-14); border: 1px solid var(--uc-line-control); border-radius: var(--uc-radius-4); background: var(--uc-surface); color: var(--uc-text-2); font-size: var(--uc-fs-12); font-weight: 600; box-shadow: var(--uc-shadow-raised); transform: translateX(-50%); }
+.v2-skeleton { display: grid; gap: var(--uc-space-12); margin: var(--uc-space-18) 0 0; padding: 0; list-style: none; }
+.v2-skeleton li { height: 64px; border-radius: var(--uc-radius-3); background: var(--uc-selected); animation: v2-pulse 1.2s ease-in-out infinite alternate; }
+.v2-spin { width: 14px !important; height: 14px !important; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: v2-rotate .8s linear infinite; }
+@keyframes v2-pulse { from { opacity: 1; } to { opacity: .45; } }
+@keyframes v2-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .v2-skeleton li, .v2-spin { animation: none; } }
 .v2-recovery, .v2-loading { display: grid; place-content: center; gap: var(--uc-space-12); min-height: 70dvh; text-align: center; }
 .v2-recovery button { padding: var(--uc-space-10) var(--uc-space-16); border: 0; border-radius: var(--uc-radius-3); background: var(--uc-ink); color: var(--uc-surface); text-decoration: none; }
 .v2-recovery small { color: var(--uc-muted); }

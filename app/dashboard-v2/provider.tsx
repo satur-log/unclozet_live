@@ -15,6 +15,7 @@ import { applyRowVersions, BROADCAST_PAGE_SIZE, diffDashboard, emptyRowVersions,
 import { hasMeaningfulDashboardChange, isDashboardState, DashboardStorageError, dashboardStorageFailure, LOCAL_TEST_STORAGE_KEY, STORAGE_KEY, saveMockState } from "./repository";
 import type { Broadcast, Customer, DashboardState } from "./types";
 import type { BroadcastSummary } from "./summary";
+import { Shell } from "./shell";
 
 // 데이터 원본
 // - shared(운영): Supabase 하나뿐. 브라우저는 /api/dashboard/*로만 읽고 쓰며, 브라우저 복사본을 만들거나 올리지 않는다.
@@ -63,6 +64,17 @@ function mergeBroadcastsById(current: Broadcast[], incoming: Broadcast[]) {
   return [...byId.values()];
 }
 const MAX_CONFLICT_RETRIES = 3;
+
+/** 첫 데이터가 오기 전에도 메뉴와 화면 틀은 바로 보여준다. 내용 자리는 회색 줄로 채운다. */
+function LoadingFrame({ pathname, basePath }: { pathname: string; basePath: string }) {
+  const route = dashboardRoute(pathname.slice(basePath.length) || "/");
+  return <Shell section={route.kind === "customers" ? "customers" : "broadcasts"} basePath={basePath}>
+    <div className="gbx" aria-busy="true">
+      <header className="gbx-head"><h1>{route.kind === "customers" ? "고객 관리" : "방송 내역"}</h1></header>
+      <ul className="v2-skeleton" aria-hidden="true">{Array.from({ length: route.kind === "detail" ? 8 : 5 }, (_, index) => <li key={index} />)}</ul>
+    </div>
+  </Shell>;
+}
 
 function storageMessage(error: unknown) {
   if (error instanceof DashboardStorageError && error.kind === "quota") {
@@ -303,7 +315,8 @@ export function DashboardProvider({ children, mode = "shared" }: { children: Rea
     {loadError ? <main className="v2-recovery"><h1>V2 데이터를 불러오지 못했어요</h1><p>{loadError}</p><button onClick={() => { setLoadError(""); setSyncStatus("loading"); setRetryCount((count) => count + 1); }}>다시 불러오기</button><small>Supabase 데이터는 변경하지 않았습니다.</small></main>
       : state && backend ? <DashboardContext.Provider value={{ state, syncStatus, localOnly: backend === "local", summaries: null, commit, notify }}>{children}</DashboardContext.Provider>
       : early ? <DashboardContext.Provider value={{ state: early, syncStatus: "loading", localOnly: false, summaries: partial?.summaries ?? null, commit, notify }}>{children}</DashboardContext.Provider>
-      : <div className="v2-loading" role="status">공유 작업 공간을 불러오고 있어요…</div>}
+      : <LoadingFrame pathname={pathname} basePath={testMode ? "/test" : ""} />}
+    {syncStatus === "loading" && !loadError && !notice ? <div role="status" className="v2-toast"><span className="v2-spin" aria-hidden="true" />최신 정보를 불러오는 중이에요</div> : null}
     {unsentCopy && !loadError ? <div role="status" className="v2-refresh-notice" style={{ top: "auto", bottom: 18, display: "grid", gap: "var(--uc-space-8)", maxWidth: "min(520px, calc(100vw - 32px))" }}>
       <span>이 브라우저에 예전에 Supabase로 보내지 못한 복사본이 남아 있어요. 자동으로 반영하지 않았고, 지금 화면은 Supabase 최신 데이터입니다.</span>
       <span style={{ display: "flex", gap: "var(--uc-space-8)", justifyContent: "center" }}>
