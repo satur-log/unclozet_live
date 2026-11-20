@@ -8,15 +8,11 @@ import { availability, groupBuyBySlug, type Availability } from "./model";
 import { isSoldOut } from "./pricing";
 import { usePublicGroupBuy } from "./public-store";
 import type { GbProduct, GroupBuy } from "./types";
-import { adminPath, longDateTime, lookupPath, orderFormPath, ProductThumb, productPath, won } from "./ui";
+import { longDateTime, lookupPath, orderFormPath, ProductThumb, productPath, won } from "./ui";
 import "./group-buy.css";
 
 // 고객 쇼핑 화면: 공구 홈(상품 목록) → 상품 상세(옵션 선택) → 주문서(checkout, customer.tsx) → 주문 완료.
 // 장바구니는 없다. 같은 공구의 다른 상품은 상세에서 "추가 상품"으로 함께 주문해 배송비를 한 번만 낸다.
-
-export function ProtoBar() {
-  return <div className="gb-proto-bar"><span>테스트 중인 화면이에요</span><Link href={adminPath()}>관리자 화면 →</Link></div>;
-}
 
 /** 미리보기(?preview=1)로 들어온 판매자는 같은 탭에서 상세·장바구니로 이동해도 미리보기 상태를 유지한다. */
 export function usePreview(slug: string) {
@@ -58,17 +54,16 @@ export function StoreHeader({ groupBuy, back, title, lookupLink = true }: { grou
   </header>;
 }
 
-export function StoreFrame({ groupBuy, preview, open, children, back, title, showProtoBar = true }: { groupBuy: GroupBuy; preview: boolean; open: Availability; children: React.ReactNode; back?: string; title?: string; showProtoBar?: boolean }) {
+export function StoreFrame({ groupBuy, preview, open, children, back, title }: { groupBuy: GroupBuy; preview: boolean; open: Availability; children: React.ReactNode; back?: string; title?: string }) {
   return <div className="gb-customer">
-    {showProtoBar ? <ProtoBar /> : null}
     {preview ? <div className="gb-preview-bar">관리자 미리보기 · {open.orderable ? "주문하면 실제로 저장됩니다" : "지금은 주문을 받을 수 없는 상태입니다"}</div> : null}
     <StoreHeader groupBuy={groupBuy} back={back} title={title} />
     {children}
   </div>;
 }
 
-export function MissingStore({ showProtoBar = true }: { showProtoBar?: boolean }) {
-  return <div className="gb-customer">{showProtoBar ? <ProtoBar /> : null}<div className="gb-view-page"><div className="gb-notice"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
+export function MissingStore() {
+  return <div className="gb-customer"><div className="gb-view-page"><div className="gb-notice"><strong>공구를 찾을 수 없어요</strong><p>주소를 다시 확인해 주세요.</p></div></div></div>;
 }
 
 export function ClosedNotice({ groupBuy, reason }: { groupBuy: GroupBuy; reason: Availability["reason"] }) {
@@ -115,7 +110,7 @@ export function StoreHomePage({ slug }: { slug: string }) {
   // 상품이 하나뿐인 공구는 목록 없이 바로 상세로 보낸다.
   useEffect(() => { if (onlyProduct && (groupBuy?.status !== "draft" || preview)) router.replace(productPath(slug, onlyProduct)); }, [onlyProduct, groupBuy?.status, preview, router, slug]);
   // 상세로 넘어가는 동안 공구 홈을 그리지 않는다(홈 화면이 잠깐 보였다 바뀌는 깜빡임 방지).
-  if (!state || (onlyProduct && (groupBuy?.status !== "draft" || preview))) return <div className="gb-customer"><ProtoBar /><p className="gb-center-note">불러오는 중…</p></div>;
+  if (!state || (onlyProduct && (groupBuy?.status !== "draft" || preview))) return <div className="gb-customer"><p className="gb-center-note">불러오는 중…</p></div>;
   if (!groupBuy) return <MissingStore />;
   const open = availability(groupBuy, now);
   if (groupBuy.status === "draft" && !preview) return <StoreFrame groupBuy={groupBuy} preview={false} open={open}><div className="gb-view-page"><ClosedNotice groupBuy={groupBuy} reason="draft" /></div></StoreFrame>;

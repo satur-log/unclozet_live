@@ -124,9 +124,9 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
   }, [product, saved]);
 
   if (!state) return <div className="gb-customer"><p className="gb-center-note">불러오는 중…</p></div>;
-  if (!groupBuy) return <MissingStore showProtoBar={false} />;
+  if (!groupBuy) return <MissingStore />;
   const open = availability(groupBuy, now);
-  if (!product || (groupBuy.status === "draft" && !preview)) return <StoreFrame groupBuy={groupBuy} preview={preview} open={open} showProtoBar={false}><div className="gb-view-page"><div className="gb-notice"><strong>상품을 찾을 수 없어요</strong><Link href={orderFormPath(slug)}>공구 홈으로</Link></div></div></StoreFrame>;
+  if (!product || (groupBuy.status === "draft" && !preview)) return <StoreFrame groupBuy={groupBuy} preview={preview} open={open}><div className="gb-view-page"><div className="gb-notice"><strong>상품을 찾을 수 없어요</strong><Link href={orderFormPath(slug)}>공구 홈으로</Link></div></div></StoreFrame>;
   const gb = groupBuy;
   const item = product;
   const canBuy = open.orderable || (preview && open.reason === "draft");
@@ -208,7 +208,7 @@ export function ProductPage({ slug, productId }: { slug: string; productId: stri
     <button type="button" className="gb-pdp-buy" onClick={buy}>구매하기</button>
   </div>;
 
-  return <StoreFrame groupBuy={gb} preview={preview} open={open} showProtoBar={false}>
+  return <StoreFrame groupBuy={gb} preview={preview} open={open}>
     <article className="gb-pdp">
       <div className="gb-pdp-top">
         <Gallery product={item} />

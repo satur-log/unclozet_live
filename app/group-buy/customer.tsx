@@ -9,14 +9,13 @@ import { availability, customerInputIssues, customerStep, groupBuyBySlug, maskAd
 import { priceCart, type PricedCart } from "./pricing";
 import { lookupPublicOrders, submitPublicOrder, useOrderByToken, usePublicGroupBuy } from "./public-store";
 import { remoteAreaLabel, remoteAreaOf } from "./remote-area";
-import { ClosedNotice, MissingStore, ProtoBar, StoreFrame, StoreHeader, useNow, usePreview } from "./storefront";
+import { ClosedNotice, MissingStore, StoreFrame, StoreHeader, useNow, usePreview } from "./storefront";
 import type { CustomerInput, GbOrder, GroupBuy, GroupBuyState } from "./types";
 import { absoluteUrl, cartLines, copyText, formatPhoneInput, longDateTime, lookupPath, orderFormPath, orderViewPath, PriceRows, ProductThumb, productPath, won } from "./ui";
 import "./group-buy.css";
 
 function CustomerFrame({ children }: { children: React.ReactNode }) {
   return <div className="gb-customer">
-    <ProtoBar />
     {children}
   </div>;
 }
