@@ -214,7 +214,6 @@ export function CheckoutPage({ slug }: { slug: string }) {
             <li>동의를 거부할 수 있으나, 이 경우 주문할 수 없습니다.</li>
           </ul></details>
           {errors.consent ? <p className="gb-error">{errors.consent}</p> : null}
-          <p className="gb-turnstile">🛡️ 로봇 확인(Cloudflare Turnstile) 자리 · 프로토타입에서는 생략</p>
         </section>
 
         <section className="gb-card"><h2>결제 금액</h2><PriceRows {...priced} />{gb.remoteShippingFee ? remoteArea ? <p className="gb-help gb-remote-note">{remoteAreaLabel(remoteArea)} 지역 주소라 배송비 {won(priced.shippingFee)}이 적용됐어요.</p> : <p className="gb-help">제주·도서산간 주소는 배송비 {won(gb.remoteShippingFee)}이 자동으로 적용돼요.</p> : null}<p className="gb-help">무통장 입금 · 주문 완료 화면에서 입금 계좌를 안내해 드려요.</p></section>

@@ -57,7 +57,6 @@
 .gb-consent details { font-size: var(--uc-fs-13); color: var(--uc-muted); }
 .gb-consent summary { cursor: pointer; margin-left: 30px; }
 .gb-consent ul { margin: var(--uc-space-8) 0 0; padding-left: var(--uc-space-18); display: grid; gap: var(--uc-space-4); line-height: 1.5; }
-.gb-turnstile { margin: var(--uc-space-14) 0 0; padding: var(--uc-space-10) var(--uc-space-12); border: 1px dashed var(--uc-line-control); border-radius: var(--uc-radius-3); font-size: var(--uc-fs-12); color: var(--uc-muted); }
 
 .gb-sticky { position: sticky; bottom: 0; z-index: var(--uc-z-sticky); margin: var(--uc-space-16) -16px 0; padding: var(--uc-space-12) var(--uc-space-16) calc(var(--uc-space-12) + env(safe-area-inset-bottom)); background: var(--uc-surface); border-top: 1px solid var(--uc-line); box-shadow: var(--uc-shadow-sheet); }
 .gb-sticky-row { display: flex; align-items: center; justify-content: space-between; gap: var(--uc-space-12); }
@@ -395,7 +394,6 @@
 .gb-shop .gb-checkout-notice { background: var(--uc-surface); }
 .gb-shop .gb-checkout-notice .gb-check { padding: var(--uc-space-14); background: var(--uc-soft); font-size: var(--uc-fs-13); }
 .gb-shop .gb-checkout-notice b, .gb-shop .gb-consent b { color: var(--uc-red); font-weight: 700; }
-.gb-shop .gb-turnstile { border-radius: var(--uc-radius-0); }
 .gb-shop .gb-price-rows { margin-top: 0; font-size: var(--uc-fs-14); }
 .gb-shop .gb-price-rows .total { padding-top: var(--uc-space-12); border-top: var(--uc-border-rule) solid var(--uc-ink); }
 .gb-shop .gb-price-rows .total dd { color: var(--uc-red); font-size: var(--uc-fs-20); font-weight: 800; }
