@@ -94,6 +94,18 @@ export async function readBroadcastPage(offset: number, limit: number): Promise<
   return { broadcasts: body.map((row) => row.data), versions, total: Number.isFinite(total) ? total : body.length };
 }
 
+/** 방송 한 건(상세 화면을 먼저 그리려고). 없으면 null. */
+export async function readBroadcast(id: string): Promise<{ broadcast: Broadcast; version: number } | null | undefined> {
+  const c = config();
+  if (!c) return undefined;
+  await ensureMigrated(c);
+  const { body } = await call<Row<Broadcast>[]>(c, `/dashboard_v2_broadcasts?select=data,version&id=eq.${encodeURIComponent(id)}&limit=1`);
+  const row = body[0];
+  if (!row) return null;
+  if (!validBroadcast(row.data)) throw new Error("Supabase의 방송 데이터 형식이 올바르지 않아요.");
+  return { broadcast: row.data, version: row.version };
+}
+
 /** 바뀐 행 묶음을 한 트랜잭션으로 저장한다. 다른 곳에서 먼저 고친 행이 있으면 WorkspaceConflictError. */
 export async function commitDashboard(changes: DashboardChanges): Promise<RowVersions> {
   const c = config();

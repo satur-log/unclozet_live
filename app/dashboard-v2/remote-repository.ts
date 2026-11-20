@@ -1,6 +1,6 @@
 import { canonicalInstagramId } from "./shipping-parser";
 import { isDashboardState } from "./repository";
-import { sortBroadcasts, type DashboardChanges, type RowVersions } from "./row-sync";
+import { BROADCAST_PAGE_SIZE, sortBroadcasts, type DashboardChanges, type RowVersions } from "./row-sync";
 import type { Broadcast, Customer, DashboardState } from "./types";
 
 export const REMOTE_MIGRATION_KEY = "unclozet-dashboard-v2-remote-migration-v1";
@@ -30,31 +30,57 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 type LocalReply = { mode: "local" };
-type CustomersReply = { mode: "remote"; project: string | null; customers: Customer[]; versions: Record<string, number> };
-type BroadcastPageReply = { mode: "remote"; project: string | null; broadcasts: Broadcast[]; versions: Record<string, number>; total: number; pageSize: number };
+export type CustomersReply = { mode: "remote"; project: string | null; customers: Customer[]; versions: Record<string, number> };
+export type BroadcastPageReply = { mode: "remote"; project: string | null; broadcasts: Broadcast[]; versions: Record<string, number>; total: number; pageSize: number };
+export type SingleBroadcastReply = { mode: "remote"; broadcast: Broadcast | null; version: number | null };
 
-const broadcastPage = (offset: number) => call<BroadcastPageReply | LocalReply>(`/api/dashboard/state?part=broadcasts&offset=${offset}`);
+const broadcastPage = (offset: number, limit = BROADCAST_PAGE_SIZE) => call<BroadcastPageReply | LocalReply>(`/api/dashboard/state?part=broadcasts&offset=${offset}&limit=${limit}`);
 
-export async function fetchRemoteDashboardState(): Promise<RemoteWorkspace> {
-  const [customers, first] = await Promise.all([call<CustomersReply | LocalReply>("/api/dashboard/state?part=customers"), broadcastPage(0)]);
-  if (customers.mode === "local" || first.mode === "local") return { mode: "local" };
-  const rest: BroadcastPageReply[] = [];
-  const offsets: number[] = [];
-  for (let offset = first.pageSize; offset < first.total; offset += first.pageSize) offsets.push(offset);
-  for (const page of await Promise.all(offsets.map(broadcastPage))) {
-    if (page.mode === "local") return { mode: "local" };
-    rest.push(page);
-  }
-  const pages = [first, ...rest];
-  // 받는 사이에 방송이 추가·삭제되면 페이지 경계가 밀려 겹치거나 빠질 수 있다. 겹침은 id로 걸러내고, 수가 모자라면 다시 받는다.
-  const byId = new Map<string, Broadcast>();
-  const broadcastVersions: Record<string, number> = {};
-  for (const page of pages) for (const broadcast of page.broadcasts) { byId.set(broadcast.id, broadcast); broadcastVersions[broadcast.id] = page.versions[broadcast.id]; }
-  const total = Math.max(...pages.map((page) => page.total));
-  if (byId.size < total) throw new RemoteDashboardError("방송 목록이 바뀌는 중이라 다시 불러와야 해요. 잠시 후 다시 시도해 주세요.", "RETRY", 0);
-  const state: DashboardState = { version: 2, broadcasts: sortBroadcasts([...byId.values()]), customers: customers.customers };
-  if (!isDashboardState(state)) throw new RemoteDashboardError("Supabase의 V2 데이터 형식이 올바르지 않아요.", "INVALID", 200);
-  return { mode: "remote", state, versions: { broadcasts: broadcastVersions, customers: customers.versions }, project: first.project };
+/**
+ * 화면에 필요한 것부터 받는다. 요청은 모두 동시에 시작하고, 각 부분은 도착하는 대로 쓸 수 있다.
+ * - firstPage: 최신 방송 firstLimit건(목록 화면을 먼저 그리는 용도)
+ * - broadcast: 상세 화면의 방송 한 건
+ * - full: 전체(고객 + 모든 방송). 수정·저장은 이것을 받은 뒤에만 한다.
+ */
+export type DashboardLoad = {
+  customers: Promise<CustomersReply | LocalReply>;
+  firstPage: Promise<BroadcastPageReply | LocalReply>;
+  broadcast: Promise<SingleBroadcastReply | LocalReply> | null;
+  full: Promise<RemoteWorkspace>;
+};
+
+export function startDashboardLoad({ firstLimit = BROADCAST_PAGE_SIZE, broadcastId }: { firstLimit?: number; broadcastId?: string } = {}): DashboardLoad {
+  const customers = call<CustomersReply | LocalReply>("/api/dashboard/state?part=customers");
+  const firstPage = broadcastPage(0, firstLimit);
+  const broadcast = broadcastId ? call<SingleBroadcastReply | LocalReply>(`/api/dashboard/state?part=broadcast&id=${encodeURIComponent(broadcastId)}`) : null;
+  // 화면이 먼저 쓰지 않고 넘어가도 "처리되지 않은 오류"로 남지 않게 한다(full에서 다시 확인한다).
+  for (const early of [customers, firstPage, broadcast]) early?.catch(() => undefined);
+  const full = (async (): Promise<RemoteWorkspace> => {
+    const [customerReply, first] = await Promise.all([customers, firstPage]);
+    if (customerReply.mode === "local" || first.mode === "local") return { mode: "local" };
+    const offsets: number[] = [];
+    for (let offset = first.broadcasts.length < first.pageSize ? first.total : first.pageSize; offset < first.total; offset += BROADCAST_PAGE_SIZE) offsets.push(offset);
+    const rest: BroadcastPageReply[] = [];
+    for (const page of await Promise.all(offsets.map((offset) => broadcastPage(offset)))) {
+      if (page.mode === "local") return { mode: "local" };
+      rest.push(page);
+    }
+    const pages = [first, ...rest];
+    // 받는 사이에 방송이 추가·삭제되면 페이지 경계가 밀려 겹치거나 빠질 수 있다. 겹침은 id로 걸러내고, 수가 모자라면 다시 받는다.
+    const byId = new Map<string, Broadcast>();
+    const broadcastVersions: Record<string, number> = {};
+    for (const page of pages) for (const item of page.broadcasts) { byId.set(item.id, item); broadcastVersions[item.id] = page.versions[item.id]; }
+    const total = Math.max(...pages.map((page) => page.total));
+    if (byId.size < total) throw new RemoteDashboardError("방송 목록이 바뀌는 중이라 다시 불러와야 해요. 잠시 후 다시 시도해 주세요.", "RETRY", 0);
+    const state: DashboardState = { version: 2, broadcasts: sortBroadcasts([...byId.values()]), customers: customerReply.customers };
+    if (!isDashboardState(state)) throw new RemoteDashboardError("Supabase의 V2 데이터 형식이 올바르지 않아요.", "INVALID", 200);
+    return { mode: "remote", state, versions: { broadcasts: broadcastVersions, customers: customerReply.versions }, project: first.project };
+  })();
+  return { customers, firstPage, broadcast, full };
+}
+
+export function fetchRemoteDashboardState(): Promise<RemoteWorkspace> {
+  return startDashboardLoad().full;
 }
 
 /** 바뀐 행만 저장한다. 다른 곳에서 먼저 고친 행이 있으면 code "CONFLICT"로 실패한다. */
