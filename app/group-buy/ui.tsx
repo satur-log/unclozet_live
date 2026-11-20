@@ -16,18 +16,22 @@ export function useAdminPath() {
   const base = useContext(AdminBaseContext);
   return (groupBuyId?: string) => adminPath(groupBuyId, base);
 }
-export const orderFormPath = (slug: string) => `${TEST_BASE}/gb/${slug}`;
-export const productPath = (slug: string, productId: string) => `${TEST_BASE}/gb/${slug}/p/${productId}`;
-export const checkoutPath = (slug: string) => `${TEST_BASE}/gb/${slug}/checkout`;
-export const lookupPath = () => `${TEST_BASE}/gb/lookup`;
-export const orderViewPath = (token: string) => `${TEST_BASE}/gb/order/${token}`;
-export const absoluteUrl = (path: string) => typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+// 고객 화면 주소. next.config.ts의 rewrites가 app/test/gb/ 아래 화면으로 연결한다(/pants는 마약팬츠 상품 상세).
+export const orderFormPath = (slug: string) => `/${slug}`;
+export const productPath = (slug: string, productId: string) => `/${slug}/p/${productId}`;
+export const checkoutPath = (slug: string) => `/${slug}/checkout`;
+export const lookupPath = () => "/lookup";
+export const orderViewPath = (token: string) => `/order/${token}`;
+/** 고객에게 보내는 주소의 도메인. 운영(관리 화면 포함)에서는 고객 도메인, Preview·로컬은 지금 연 주소(테스트 DB를 쓰도록). */
+export const CUSTOMER_ORIGIN = "https://gb.uncloset.co.kr";
+const PRODUCTION_HOSTS = new Set(["unclozet.vercel.app", "gb.uncloset.co.kr"]);
+export const absoluteUrl = (path: string) => typeof window === "undefined" ? path : `${PRODUCTION_HOSTS.has(window.location.hostname) ? CUSTOMER_ORIGIN : window.location.origin}${path}`;
 /** Public share URL for the pants group buy; other group buys keep their existing dashboard URL. */
-export const orderLinkUrl = (slug: string) => slug === "pants" ? "https://gb.uncloset.co.kr/pants" : absoluteUrl(orderFormPath(slug));
+export const orderLinkUrl = (slug: string) => slug === "pants" ? `${CUSTOMER_ORIGIN}/pants` : absoluteUrl(orderFormPath(slug));
 /** Customer screen button opens the public pants URL without an admin preview flag. */
 export const customerScreenUrl = (slug: string, productId?: string) => slug === "pants"
-  ? "https://gb.uncloset.co.kr/pants"
-  : absoluteUrl(`${productId ? productPath(slug, productId) : orderFormPath(slug)}?preview=1`);
+  ? `${CUSTOMER_ORIGIN}/pants`
+  : `${productId ? productPath(slug, productId) : orderFormPath(slug)}?preview=1`; // 미리보기는 관리자 쿠키가 있는 지금 주소에서 연다
 
 export const won = (value: number) => `${value.toLocaleString("ko-KR")}원`;
 // 공구 시각은 항상 한국 시간으로 보여준다. 서버(UTC)가 만든 HTML과 브라우저 화면도 같아진다.
